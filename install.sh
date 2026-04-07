@@ -92,14 +92,14 @@ check_system() {
 show_firewall_notice() {
   cat <<EOF
 ${YELLOW}========== 重要提醒 ==========${NC}
-你的原脚本会直接关闭 ufw / firewalld / iptables。
-为了更适合真实服务器环境，这个整合版不会自动帮你清空防火墙。
+原始脚本会直接关闭 ufw / firewalld / iptables。
+为了更适合真实服务器环境，这个整合版不会自动清空防火墙。
 
-请你手动确认以下端口已经放行：
+请手动确认以下端口已经放行：
 - DERP 端口: ${DERP_PORT}
 - DERP HTTP 端口: ${HTTP_PORT}
 - Headscale 端口: ${HEADSCALE_PORT}
-- 如果你自己有反代/HTTPS，还要放行 80 / 443
+- 如果已有反代/HTTPS，还要放行 80 / 443
 ${YELLOW}==============================${NC}
 EOF
 }
@@ -237,7 +237,7 @@ install_tailscale() {
 ${YELLOW}[WARN]${NC} Tailscale 客户端自动安装失败。
 这通常是因为当前国内服务器无法稳定访问 tailscale.com。
 
-你可以先手动安装 Tailscale 客户端，然后再重新运行本脚本后续步骤。
+可先手动安装 Tailscale 客户端，然后再重新运行本脚本后续步骤。
 官方安装说明：
 https://tailscale.com/download/linux
 EOF
@@ -385,7 +385,7 @@ EOF
 create_apikey() {
   info "生成 Headscale API Key..."
   if ! headscale apikeys create --expiration 9999d; then
-    warn "API Key 自动生成失败，但主体安装已完成。你可以稍后手动执行：headscale apikeys create --expiration 9999d"
+    warn "API Key 自动生成失败，但主体安装已完成。可稍后手动执行：headscale apikeys create --expiration 9999d"
   fi
 }
 
@@ -394,7 +394,7 @@ enable_verify_clients_if_needed() {
   echo
   warn "是否启用 DERP 防白嫖校验（--verify-clients）？"
   warn "建议先确认 Headscale、DERP、客户端接入都已经正常后再启用。"
-  warn "启用后会限制未通过验证的客户端使用你的 DERP 中继服务。"
+  warn "启用后会限制未通过验证的客户端使用当前 DERP 中继服务。"
   read -r -p "现在启用吗？[y/N]: " answer || true
   answer="${answer:-N}"
 
@@ -408,7 +408,7 @@ enable_verify_clients_if_needed() {
       success "已启用 DERP 防白嫖校验（--verify-clients）。"
     fi
   else
-    info "已跳过启用 DERP 防白嫖校验，你可以后续手动开启。"
+    info "已跳过启用 DERP 防白嫖校验，后续可手动开启。"
   fi
 }
 

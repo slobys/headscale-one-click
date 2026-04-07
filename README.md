@@ -137,7 +137,7 @@ sudo ./install.sh
 
 ## 国内服务器使用说明
 
-你特别强调的是 **国内服务器可安装**，所以这版脚本做了两个关键处理：
+本项目针对 **国内服务器可安装** 场景，做了两个关键处理：
 
 ### 1. Go 使用国内代理
 
@@ -260,13 +260,13 @@ sudo ./install.sh
 
 这是这个项目比较实用、也比较有辨识度的一个功能点。
 
-你原方案里的“防白嫖”功能，本质上是通过为 `derp` 增加：
+原方案里的“防白嫖”功能，本质上是通过为 `derp` 增加：
 
 ```bash
 --verify-clients
 ```
 
-来限制谁可以使用你的 DERP 中继服务。
+来限制谁可以使用当前服务器提供的 DERP 中继服务。
 
 ### 它的实际作用
 
@@ -311,7 +311,7 @@ systemctl restart derp
 
 ## 安装完成后
 
-安装完成后，你可以通过下面地址访问：
+安装完成后，可通过下面地址访问：
 
 ```text
 http://服务器IP:Headscale端口/web
@@ -383,7 +383,7 @@ tailscale up --login-server=http://1.2.3.4:8080 --accept-routes=true --accept-dn
 
 ### 3）如果后面继续按博客做“白嫖”设置
 
-你可以手动编辑：
+可手动编辑：
 
 ```bash
 /etc/systemd/system/derp.service
@@ -515,7 +515,7 @@ git init
 git add .
 git commit -m "feat: add one-click installer for headscale derp and ui"
 git branch -M main
-git remote add origin 你的仓库地址
+git remote add origin <repository-url>
 git push -u origin main
 ```
 
@@ -536,7 +536,7 @@ git push -u origin main
 2. 确认 `/root/` 本地安装包优先逻辑正常
 3. 确认 `headscale-ui.zip` 解压后目录结构确实落在 `/var/www/web`
 4. 确认 `http://服务器IP:Headscale端口/web` 能正常打开
-5. 确认 `headscale apikeys create --expiration 9999d` 在你的目标版本里可用
+5. 确认 `headscale apikeys create --expiration 9999d` 在目标版本中可用
 6. 确认 `menu.sh`、`update.sh`、`repair.sh` 都能正常执行
 7. 确认博客中的命令示例与你仓库 README 一致
 
@@ -544,7 +544,7 @@ git push -u origin main
 
 ## 博客 / 视频配套建议
 
-如果你后面打算把这个项目配套到博客或视频里，建议这样组织：
+如果后续计划将本项目配套到博客或视频中，建议这样组织：
 
 - 博客正文讲原理和操作步骤
 - GitHub 仓库放最终脚本项目
@@ -557,7 +557,7 @@ git push -u origin main
 
 ## 后续可继续扩展
 
-如果你后面要把它做成更完整的公开项目，建议继续增加：
+如果后续计划将本项目继续扩展为更完整的公开项目，建议继续增加：
 
 - 一键申请 HTTPS 证书
 - 一键创建 namespace / preauth key / users
