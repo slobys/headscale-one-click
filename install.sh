@@ -389,6 +389,29 @@ create_apikey() {
   fi
 }
 
+enable_verify_clients_if_needed() {
+  local answer=""
+  echo
+  warn "是否启用 DERP 防白嫖校验（--verify-clients）？"
+  warn "建议先确认 Headscale、DERP、客户端接入都已经正常后再启用。"
+  warn "启用后会限制未通过验证的客户端使用你的 DERP 中继服务。"
+  read -r -p "现在启用吗？[y/N]: " answer || true
+  answer="${answer:-N}"
+
+  if [[ "$answer" =~ ^[Yy]$ ]]; then
+    if grep -q -- '--verify-clients' "$DERP_SERVICE"; then
+      info "检测到 derp.service 已启用 --verify-clients，跳过重复修改。"
+    else
+      sed -i 's|^ExecStart=.*|& --verify-clients|' "$DERP_SERVICE"
+      systemctl daemon-reload
+      systemctl restart derp
+      success "已启用 DERP 防白嫖校验（--verify-clients）。"
+    fi
+  else
+    info "已跳过启用 DERP 防白嫖校验，你可以后续手动开启。"
+  fi
+}
+
 show_summary() {
   cat <<EOF
 
@@ -404,7 +427,7 @@ ${GREEN}安装完成。${NC}
   tailscale up --login-server=http://${SERVER_IP}:${HEADSCALE_PORT} --accept-routes=true
   tailscale up --login-server=http://${SERVER_IP}:${HEADSCALE_PORT} --accept-routes=true --accept-dns=false --advertise-routes=192.168.2.0/24 --reset
 
-如果后面你要按博客继续做“白嫖 DERP”调整，可以手动编辑：
+如需后续手动开启 DERP 防白嫖校验，可编辑：
   /etc/systemd/system/derp.service
 在 ExecStart 最后追加：
   --verify-clients
@@ -447,6 +470,7 @@ main() {
   configure_nginx
   configure_headscale
   create_apikey
+  enable_verify_clients_if_needed
   show_summary
 }
 

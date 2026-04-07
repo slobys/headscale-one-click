@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.5.0 - 2026-04-07
+
+### Changed
+- `install.sh` 新增可选交互开关，可在安装完成后选择是否启用 DERP 防白嫖校验（`--verify-clients`）
+- `README.md` 新增“DERP 防白嫖说明”章节，解释实际作用、启用时机与手动开启方法
+
 ## v1.4.0 - 2026-04-07
 
 ### Changed

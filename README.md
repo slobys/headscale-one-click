@@ -10,6 +10,7 @@
 - 国内友好：支持本地安装包优先，尽量降低国外下载源不稳定带来的失败率
 - 保留原方案思路：尽量贴近你博客中已经跑通的做法
 - 带维护脚本：包含安装、更新、卸载、修复、菜单管理、版本检查
+- 支持可选启用 DERP 防白嫖校验（`--verify-clients`）
 - 适合公开发布：补齐 README、CHANGELOG、.gitignore
 - 默认使用已验证的稳定版本，同时允许手动输入自定义版本
 
@@ -223,6 +224,57 @@ sudo ./install.sh
 - Headscale UI 压缩包：`headscale-ui.zip`
 
 ---
+
+## DERP 防白嫖说明
+
+你原方案里的“防白嫖”功能，本质上是通过为 `derp` 增加：
+
+```bash
+--verify-clients
+```
+
+来限制谁可以使用你的 DERP 中继服务。
+
+### 它的实际作用
+
+- 降低公网其他客户端白嫖你 DERP 中继的风险
+- 减少带宽、流量和中继资源被无关节点占用
+- 让 DERP 更偏向只服务于你自己的 Headscale 网络节点
+
+### 为什么不建议一开始就默认强开
+
+因为如果 Headscale、DERP、客户端接入流程还没完全跑通，过早启用它，可能会导致：
+
+- 自己的客户端也无法正常通过 DERP
+- 看起来像 DERP 挂了
+- 增加排障难度
+
+所以当前脚本采用的是：
+
+- 安装完成后询问是否启用
+- 默认不强制启用
+- 建议在确认环境已经正常后再打开
+
+### 手动开启方法
+
+编辑：
+
+```bash
+/etc/systemd/system/derp.service
+```
+
+在 `ExecStart` 最后追加：
+
+```bash
+--verify-clients
+```
+
+然后执行：
+
+```bash
+systemctl daemon-reload
+systemctl restart derp
+```
 
 ## 安装完成后
 
