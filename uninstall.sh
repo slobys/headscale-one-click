@@ -23,7 +23,7 @@ cat <<EOF
 你即将卸载以下内容：
 - DERP 服务与证书
 - Headscale 服务
-- Headscale UI 文件
+- Headscale Web UI 文件
 - 当前脚本生成的 Nginx 独立站点配置
 - /var/www/derp.json
 
@@ -50,7 +50,7 @@ info "删除 DERP 服务文件与证书..."
 rm -f /etc/systemd/system/derp.service
 rm -rf /etc/derp
 
-info "删除 Headscale UI 与 DERP JSON..."
+info "删除 Headscale Web UI 与 DERP JSON..."
 rm -rf /var/www/web
 rm -f /var/www/derp.json
 

@@ -122,13 +122,13 @@ find_or_download_file() {
   local output_path="$3"
 
   if [[ -f "/root/${filename}" ]]; then
-    info "检测到本地文件 /root/${filename}，优先使用本地包。"
+    info "检测到本地文件 /root/${filename}，优先使用本地安装文件。"
     cp -f "/root/${filename}" "$output_path"
     return 0
   fi
 
   if [[ -f "./${filename}" ]]; then
-    info "检测到当前目录文件 ${filename}，优先使用本地包。"
+    info "检测到当前目录文件 ${filename}，优先使用本地安装文件。"
     cp -f "./${filename}" "$output_path"
     return 0
   fi
@@ -142,7 +142,7 @@ ${RED}[ERROR]${NC} 下载失败：${filename}
 2. GitHub / go.dev / tailscale.com 在当前网络下超时
 3. 目标版本文件名已变化
 
-国内服务器建议处理方式：
+中国大陆服务器环境建议处理方式：
 - 先在本地电脑下载好对应文件
 - 上传到 /root/ 或脚本当前目录
 - 然后重新执行脚本
@@ -235,7 +235,7 @@ install_tailscale() {
   if ! curl -fsSL https://tailscale.com/install.sh | sh; then
     cat <<EOF
 ${YELLOW}[WARN]${NC} Tailscale 客户端自动安装失败。
-这通常是因为当前国内服务器无法稳定访问 tailscale.com。
+这通常是因为当前中国大陆服务器环境无法稳定访问 tailscale.com。
 
 可先手动安装 Tailscale 客户端，然后再重新运行本脚本后续步骤。
 官方安装说明：
@@ -266,7 +266,7 @@ install_headscale_ui() {
   local ui_zip_name="$1"
   local ui_zip_path="${WORKDIR}/${ui_zip_name}"
 
-  [[ -f "/root/${ui_zip_name}" ]] || [[ -f "./${ui_zip_name}" ]] || die "未找到 ${ui_zip_name}。国内服务器建议你先把 Headscale UI 压缩包上传到 /root/ 或当前目录。"
+  [[ -f "/root/${ui_zip_name}" ]] || [[ -f "./${ui_zip_name}" ]] || die "未找到 ${ui_zip_name}。中国大陆服务器环境建议先把 Headscale Web UI 压缩包上传到 /root/ 或当前目录。"
 
   if [[ -f "/root/${ui_zip_name}" ]]; then
     cp -f "/root/${ui_zip_name}" "$ui_zip_path"
@@ -274,13 +274,13 @@ install_headscale_ui() {
     cp -f "./${ui_zip_name}" "$ui_zip_path"
   fi
 
-  info "部署 Headscale UI..."
+  info "部署 Headscale Web UI..."
   mkdir -p /var/www
   rm -rf "$HEADSCALE_UI_DIR"
   unzip -o "$ui_zip_path" -d /var/www >/dev/null
 
-  [[ -f "${HEADSCALE_UI_DIR}/index.html" ]] || die "Headscale UI 解压后未找到 ${HEADSCALE_UI_DIR}/index.html，请检查压缩包目录结构是否与博客使用版本一致。"
-  success "Headscale UI 部署完成。"
+  [[ -f "${HEADSCALE_UI_DIR}/index.html" ]] || die "Headscale Web UI 解压后未找到 ${HEADSCALE_UI_DIR}/index.html，请检查压缩包目录结构是否与博客使用版本一致。"
+  success "Headscale Web UI 部署完成。"
 }
 
 configure_nginx() {
@@ -392,7 +392,7 @@ create_apikey() {
 enable_verify_clients_if_needed() {
   local answer=""
   echo
-  warn "是否启用 DERP 防白嫖校验（--verify-clients）？"
+  warn "是否启用 DERP 客户端校验（--verify-clients）？"
   warn "建议先确认 Headscale、DERP、客户端接入都已经正常后再启用。"
   warn "启用后会限制未通过验证的客户端使用当前 DERP 中继服务。"
   read -r -p "现在启用吗？[y/N]: " answer || true
@@ -405,10 +405,10 @@ enable_verify_clients_if_needed() {
       sed -i 's|^ExecStart=.*|& --verify-clients|' "$DERP_SERVICE"
       systemctl daemon-reload
       systemctl restart derp
-      success "已启用 DERP 防白嫖校验（--verify-clients）。"
+      success "已启用 DERP 客户端校验（--verify-clients）。"
     fi
   else
-    info "已跳过启用 DERP 防白嫖校验，后续可手动开启。"
+    info "已跳过启用 DERP 客户端校验，后续可手动开启。"
   fi
 }
 
@@ -418,7 +418,7 @@ show_summary() {
 ${GREEN}安装完成。${NC}
 
 访问地址：
-- Headscale UI: http://${SERVER_IP}:${HEADSCALE_PORT}/web
+- Headscale Web UI: http://${SERVER_IP}:${HEADSCALE_PORT}/web
 
 客户端接入命令：
   tailscale up --login-server=http://${SERVER_IP}:${HEADSCALE_PORT}
@@ -427,7 +427,7 @@ ${GREEN}安装完成。${NC}
   tailscale up --login-server=http://${SERVER_IP}:${HEADSCALE_PORT} --accept-routes=true
   tailscale up --login-server=http://${SERVER_IP}:${HEADSCALE_PORT} --accept-routes=true --accept-dns=false --advertise-routes=192.168.2.0/24 --reset
 
-如需后续手动开启 DERP 防白嫖校验，可编辑：
+如需后续手动开启 DERP 客户端校验，可编辑：
   /etc/systemd/system/derp.service
 在 ExecStart 最后追加：
   --verify-clients
@@ -452,7 +452,7 @@ main() {
   prompt_value HTTP_PORT "请输入HTTP端口" "3340"
   prompt_value GO_VERSION "请输入 Go 版本（不要带 go 前缀，例如 1.26.1）" "1.26.1"
   prompt_value HEADSCALE_VERSION "请输入 Headscale 版本" "0.28.0"
-  prompt_value HEADSCALE_UI_ZIP "请输入 Headscale UI 压缩包文件名" "headscale-ui.zip"
+  prompt_value HEADSCALE_UI_ZIP "请输入 Headscale Web UI 压缩包文件名" "headscale-ui.zip"
 
   validate_ipv4 "$SERVER_IP" || die "服务器IP格式不正确。"
   validate_ipv4 "$IP_PREFIX" || die "IP前缀格式不正确，应类似 100.64.0.0"

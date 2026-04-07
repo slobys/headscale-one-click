@@ -40,9 +40,9 @@ else
 fi
 
 if [[ ! -d /var/www/web ]]; then
-  warn "未找到 /var/www/web，Headscale UI 目录可能缺失。"
+  warn "未找到 /var/www/web，Headscale Web UI 目录可能缺失。"
 else
-  info "检测到 Headscale UI 目录。"
+  info "检测到 Headscale Web UI 目录。"
 fi
 
 if [[ -f /etc/nginx/sites-available/headscale-one-click.conf ]]; then
@@ -76,4 +76,4 @@ systemctl --no-pager --full status nginx 2>/dev/null || true
 
 echo
 success "基础修复流程执行完成。"
-warn "如果问题仍未解决，建议重点检查：域名解析、端口放行、Headscale UI 压缩包内容、以及 derper 编译阶段是否成功。"
+warn "如果问题仍未解决，建议重点检查：域名解析、端口放行、Headscale Web UI 压缩包内容，以及 derper 编译阶段是否成功。"

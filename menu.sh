@@ -41,7 +41,7 @@ show_access_info() {
   echo "- Headscale 配置文件: /etc/headscale/config.yaml"
   echo "- DERP 服务文件: /etc/systemd/system/derp.service"
   echo "- DERP JSON: /var/www/derp.json"
-  echo "- Headscale UI 目录: /var/www/web"
+  echo "- Headscale Web UI 目录: /var/www/web"
   echo "- Nginx 站点配置: /etc/nginx/sites-available/headscale-one-click.conf"
   echo
   echo "常用命令："

@@ -50,7 +50,7 @@ main() {
   echo "当前建议关注的上游最新版本："
   echo "- Go:            ${go_version}"
   echo "- Headscale:     ${headscale_version}"
-  echo "- Headscale UI:  ${headscale_ui_version}"
+  echo "- Headscale Web UI: ${headscale_ui_version}"
   echo
 
   warn "注意：此脚本只负责检查最新版本，不会自动修改 install.sh。"

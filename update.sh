@@ -21,7 +21,7 @@ die() {
 
 cat <<EOF
 这个 update.sh 适合做以下事情：
-- 重新部署 Headscale UI
+- 重新部署 Headscale Web UI
 - 重新生成/覆盖 Nginx 配置
 - 重启 headscale / nginx / derp
 
@@ -42,18 +42,18 @@ WORKDIR="/usr/local/src/headscale-one-click"
 HEADSCALE_UI_DIR="/var/www/web"
 NGINX_CONF="/etc/nginx/sites-available/default"
 
-read -r -p "请输入 Headscale UI 压缩包文件名 [默认: headscale-ui.zip]: " UI_ZIP
+read -r -p "请输入 Headscale Web UI 压缩包文件名 [默认: headscale-ui.zip]: " UI_ZIP
 UI_ZIP="${UI_ZIP:-headscale-ui.zip}"
 
 if [[ -f "/root/${UI_ZIP}" ]]; then
-  info "检测到 /root/${UI_ZIP}，准备更新 Headscale UI。"
+  info "检测到 /root/${UI_ZIP}，准备更新 Headscale Web UI。"
   mkdir -p "$WORKDIR"
   cp -f "/root/${UI_ZIP}" "$WORKDIR/${UI_ZIP}"
   rm -rf "$HEADSCALE_UI_DIR"
   unzip -o "$WORKDIR/${UI_ZIP}" -d /var/www >/dev/null
-  success "Headscale UI 更新完成。"
+  success "Headscale Web UI 更新完成。"
 else
-  warn "未检测到 /root/${UI_ZIP}，跳过 Headscale UI 更新。"
+  warn "未检测到 /root/${UI_ZIP}，跳过 Headscale Web UI 更新。"
 fi
 
 if [[ -f "$NGINX_CONF" ]]; then
