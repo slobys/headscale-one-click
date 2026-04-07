@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-SCRIPT_VERSION="1.1.0"
+SCRIPT_VERSION="1.4.0"
 WORKDIR="/usr/local/src/headscale-one-click"
 DERP_DIR="/etc/derp"
 DERP_SERVICE="/etc/systemd/system/derp.service"
@@ -427,8 +427,8 @@ main() {
   prompt_value IP_PREFIX "请输入IP前缀（例如：100.64.0.0）" "100.64.0.0"
   prompt_value DERP_PORT "请输入Derp服务端口" "12345"
   prompt_value HTTP_PORT "请输入HTTP端口" "3340"
-  prompt_value GO_VERSION "请输入 Go 版本（不要带 go 前缀，例如 1.22.4）" "1.22.4"
-  prompt_value HEADSCALE_VERSION "请输入 Headscale 版本" "0.23.0-alpha12"
+  prompt_value GO_VERSION "请输入 Go 版本（不要带 go 前缀，例如 1.26.1）" "1.26.1"
+  prompt_value HEADSCALE_VERSION "请输入 Headscale 版本" "0.28.0"
   prompt_value HEADSCALE_UI_ZIP "请输入 Headscale UI 压缩包文件名" "headscale-ui.zip"
 
   validate_ipv4 "$SERVER_IP" || die "服务器IP格式不正确。"

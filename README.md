@@ -9,8 +9,9 @@
 - 单脚本安装：整合 DERP、Headscale、Headscale UI、Nginx 配置
 - 国内友好：支持本地安装包优先，尽量降低国外下载源不稳定带来的失败率
 - 保留原方案思路：尽量贴近你博客中已经跑通的做法
-- 带维护脚本：包含安装、更新、卸载、修复、菜单管理
+- 带维护脚本：包含安装、更新、卸载、修复、菜单管理、版本检查
 - 适合公开发布：补齐 README、CHANGELOG、.gitignore
+- 默认使用已验证的稳定版本，同时允许手动输入自定义版本
 
 ---
 
@@ -21,7 +22,7 @@
 ```bash
 git clone https://github.com/slobys/headscale-one-click.git
 cd headscale-one-click
-chmod +x install.sh update.sh uninstall.sh repair.sh menu.sh
+chmod +x install.sh update.sh uninstall.sh repair.sh menu.sh check-updates.sh
 sudo ./install.sh
 ```
 
@@ -30,16 +31,25 @@ sudo ./install.sh
 ```bash
 git clone https://github.com/slobys/headscale-one-click.git
 cd headscale-one-click
-chmod +x install.sh update.sh uninstall.sh repair.sh menu.sh
+chmod +x install.sh update.sh uninstall.sh repair.sh menu.sh check-updates.sh
 sudo ./menu.sh
+```
+
+### 方式三：先检查上游是否有新版本
+
+```bash
+git clone https://github.com/slobys/headscale-one-click.git
+cd headscale-one-click
+chmod +x check-updates.sh
+./check-updates.sh
 ```
 
 ### 国内服务器强烈建议先准备本地安装包
 
 上传到 `/root/` 或脚本当前目录：
 
-- `go1.22.4.linux-amd64.tar.gz` 或 arm64 对应版本
-- `headscale_0.23.0-alpha12_linux_amd64.deb` 或 arm64 对应版本
+- `go1.26.1.linux-amd64.tar.gz` 或 arm64 对应版本
+- `headscale_0.28.0_linux_amd64.deb` 或 arm64 对应版本
 - `headscale-ui.zip`
 
 这样会明显提高国内服务器安装成功率。
@@ -111,8 +121,8 @@ go env -w GOPROXY=https://goproxy.cn,direct
 
 建议你提前准备：
 
-- `go1.22.4.linux-amd64.tar.gz` 或 arm64 对应版本
-- `headscale_0.23.0-alpha12_linux_amd64.deb` 或 arm64 对应版本
+- `go1.26.1.linux-amd64.tar.gz` 或 arm64 对应版本
+- `headscale_0.28.0_linux_amd64.deb` 或 arm64 对应版本
 - `headscale-ui.zip`
 
 这样在国内服务器上成功率会高很多。
@@ -208,8 +218,8 @@ sudo ./install.sh
 - IP前缀：`100.64.0.0`
 - DERP端口：`12345`
 - HTTP端口：`3340`
-- Go版本：`1.22.4`
-- Headscale版本：`0.23.0-alpha12`
+- Go版本：`1.26.1`
+- Headscale版本：`0.28.0`
 - Headscale UI 压缩包：`headscale-ui.zip`
 
 ---
@@ -366,6 +376,32 @@ sudo ./menu.sh
 适合不想记命令的场景，可以通过菜单执行安装、更新、卸载、修复、查看状态和重启服务。
 
 ---
+
+## 版本策略说明
+
+这个项目不建议做成“永远自动追最新版本安装”。
+
+原因很简单：
+
+- Go 会更新
+- Headscale 会更新
+- Headscale UI 也会更新
+- 上游 release 文件名、配置模板、压缩包结构都可能变化
+
+如果安装脚本强行永远追最新，长期来看反而更容易翻车。
+
+所以当前项目采用的是：
+
+### 默认策略
+- `install.sh` 默认使用当前已整理的稳定版本
+- 你也可以在运行时手动输入其它版本
+
+### 长期维护策略
+- 通过 `check-updates.sh` 查看上游是否有新版本
+- 先手动测试新版本是否兼容
+- 确认可用后，再更新仓库默认值
+
+这比“盲目自动追最新”更适合公开一键脚本项目长期维护。
 
 ## 推荐仓库名
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.4.0 - 2026-04-07
+
+### Changed
+- `install.sh` 默认版本更新为 Go `1.26.1` 与 Headscale `0.28.0`
+- 新增 `check-updates.sh`，用于检查 Go、Headscale、Headscale UI 上游最新版本
+- `menu.sh` 新增版本检查入口
+- `README.md` 补充稳定版本策略、自定义版本说明和版本检查使用方法
+
 ## v1.3.1 - 2026-04-07
 
 ### Changed

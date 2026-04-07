@@ -70,6 +70,7 @@ show_menu() {
   echo "5. 重启服务"
   echo "6. 查看常用路径与命令"
   echo "7. 执行修复"
+  echo "8. 检查上游最新版本"
   echo "0. 退出"
   echo "=========================================="
 }
@@ -107,6 +108,10 @@ main() {
         ;;
       7)
         bash "$BASE_DIR/repair.sh"
+        pause
+        ;;
+      8)
+        bash "$BASE_DIR/check-updates.sh"
         pause
         ;;
       0)
