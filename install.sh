@@ -279,7 +279,7 @@ install_headscale() {
 }
 
 install_headscale_ui() {
-  local ui_zip_name="$1"
+  local ui_zip_name="headscale-ui.zip"
   local ui_zip_path="${WORKDIR}/${ui_zip_name}"
 
   [[ -f "/root/${ui_zip_name}" ]] || [[ -f "./${ui_zip_name}" ]] || die "未找到 ${ui_zip_name}。中国大陆服务器环境建议先把 Headscale Web UI 压缩包上传到 /root/ 或当前目录。"
@@ -468,7 +468,6 @@ main() {
   prompt_value HTTP_PORT "请输入HTTP端口" "3340"
   prompt_value GO_VERSION "请输入 Go 版本（不要带 go 前缀，例如 1.26.1）" "1.26.1"
   prompt_value HEADSCALE_VERSION "请输入 Headscale 版本" "0.28.0"
-  prompt_value HEADSCALE_UI_ZIP "请输入 Headscale Web UI 压缩包文件名" "headscale-ui.zip"
 
   validate_ipv4 "$SERVER_IP" || die "服务器IP格式不正确。"
   validate_ipv4 "$IP_PREFIX" || die "IP前缀格式不正确，应类似 100.64.0.0"
@@ -482,7 +481,7 @@ main() {
   install_derp
   install_tailscale
   install_headscale "$HEADSCALE_VERSION"
-  install_headscale_ui "$HEADSCALE_UI_ZIP"
+  install_headscale_ui
   configure_nginx
   configure_headscale
   create_apikey

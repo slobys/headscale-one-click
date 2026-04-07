@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.5.4 - 2026-04-07
+
+### Changed
+- `install.sh` 取消 Headscale Web UI 压缩包文件名输入项，统一固定使用 `headscale-ui.zip`
+- `README.md` 同步更新安装说明，明确 Go / Headscale 填写版本号，Headscale Web UI 使用固定文件名
+
 ## v1.5.3 - 2026-04-07
 
 ### Changed

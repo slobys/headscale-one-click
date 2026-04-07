@@ -256,7 +256,11 @@ apt upgrade -y
 - HTTP 端口
 - Go 版本
 - Headscale 版本
-- Headscale Web UI 压缩包文件名
+
+说明：
+
+- Go 和 Headscale 这里填写的是版本号
+- Headscale Web UI 压缩包文件名固定为 `headscale-ui.zip`，无需额外输入
 
 常见示例：
 
@@ -268,7 +272,7 @@ apt upgrade -y
 - HTTP端口：`3340`
 - Go版本：`1.26.1`
 - Headscale版本：`0.28.0`
-- Headscale Web UI 压缩包：`headscale-ui.zip`
+- Headscale Web UI 压缩包固定为：`headscale-ui.zip`
 
 ---
 
@@ -495,7 +499,7 @@ sudo ./menu.sh
 
 ### 默认策略
 - `install.sh` 默认使用当前已整理的稳定版本
-- 你也可以在运行时手动输入其它版本
+- 运行时可手动输入其它 Go / Headscale 版本
 
 ### 长期维护策略
 - 通过 `check-updates.sh` 查看上游是否有新版本
