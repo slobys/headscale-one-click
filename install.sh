@@ -104,10 +104,26 @@ ${YELLOW}==============================${NC}
 EOF
 }
 
+ask_system_upgrade() {
+  local answer=""
+  echo
+  warn "是否先执行系统软件升级（apt upgrade -y）？"
+  warn "升级系统可能触发其它服务重启；如服务器上已有在运行的业务，建议谨慎选择。"
+  read -r -p "现在执行系统升级吗？[y/N]: " answer || true
+  answer="${answer:-N}"
+
+  if [[ "$answer" =~ ^[Yy]$ ]]; then
+    info "开始执行系统软件升级..."
+    DEBIAN_FRONTEND=noninteractive apt upgrade -y
+  else
+    info "已跳过系统软件升级。"
+  fi
+}
+
 install_base_packages() {
   info "更新软件源并安装基础依赖..."
   apt update
-  DEBIAN_FRONTEND=noninteractive apt upgrade -y
+  ask_system_upgrade
   DEBIAN_FRONTEND=noninteractive apt install -y wget git openssl curl unzip nginx ca-certificates tar
 }
 
