@@ -64,6 +64,26 @@ validate_ipv4() {
   [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]
 }
 
+detect_public_ip() {
+  local detected_ip=""
+  local endpoint
+  local endpoints=(
+    "https://api.ipify.org"
+    "https://ipv4.icanhazip.com"
+    "https://ifconfig.me/ip"
+  )
+
+  for endpoint in "${endpoints[@]}"; do
+    detected_ip="$(curl -fsSL --connect-timeout 5 --max-time 10 "$endpoint" 2>/dev/null | tr -d '[:space:]' || true)"
+    if validate_ipv4 "$detected_ip"; then
+      echo "$detected_ip"
+      return 0
+    fi
+  done
+
+  echo "127.0.0.1"
+}
+
 detect_arch() {
   local machine_arch
   machine_arch="$(uname -m)"
@@ -461,7 +481,8 @@ main() {
   prepare_workdir
 
   prompt_value DOMAIN "请输入域名" "derp.example.com"
-  prompt_value SERVER_IP "请输入服务器IP" "127.0.0.1"
+  SERVER_IP_DEFAULT="$(detect_public_ip)"
+  prompt_value SERVER_IP "请输入服务器IP" "$SERVER_IP_DEFAULT"
   prompt_value HEADSCALE_PORT "请输入Headscale端口" "8080"
   prompt_value IP_PREFIX "请输入IP前缀（例如：100.64.0.0）" "100.64.0.0"
   prompt_value DERP_PORT "请输入Derp服务端口" "12345"
