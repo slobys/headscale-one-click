@@ -1,0 +1,1 @@
+        pkg_links="$(echo "$page_content" | grep -o 'href="/projects/openwrt-passwall-build/files/[^"]*'"${pkg}"_[^"]*\.ipk[^"]*"' | sed 's|^href="||;s|"$||' | head -n1)"
