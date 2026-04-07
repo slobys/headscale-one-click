@@ -16,13 +16,25 @@
 
 ## 快速开始
 
-### 1）给脚本执行权限
+### 方式一：直接从 GitHub 拉取后安装
 
 ```bash
+git clone https://github.com/slobys/headscale-one-click.git
+cd headscale-one-click
 chmod +x install.sh update.sh uninstall.sh repair.sh menu.sh
+sudo ./install.sh
 ```
 
-### 2）推荐先准备本地安装包
+### 方式二：使用菜单管理脚本
+
+```bash
+git clone https://github.com/slobys/headscale-one-click.git
+cd headscale-one-click
+chmod +x install.sh update.sh uninstall.sh repair.sh menu.sh
+sudo ./menu.sh
+```
+
+### 国内服务器强烈建议先准备本地安装包
 
 上传到 `/root/` 或脚本当前目录：
 
@@ -30,21 +42,17 @@ chmod +x install.sh update.sh uninstall.sh repair.sh menu.sh
 - `headscale_0.23.0-alpha12_linux_amd64.deb` 或 arm64 对应版本
 - `headscale-ui.zip`
 
-### 3）开始安装
-
-```bash
-sudo ./install.sh
-```
-
-如果你喜欢菜单方式，也可以直接：
-
-```bash
-sudo ./menu.sh
-```
+这样会明显提高国内服务器安装成功率。
 
 ---
 
 ## 项目说明
+
+仓库地址：
+
+```text
+https://github.com/slobys/headscale-one-click
+```
 
 这个项目整合了两部分：
 
