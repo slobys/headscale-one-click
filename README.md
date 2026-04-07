@@ -2,7 +2,17 @@
 
 一个面向 **国内服务器 / 国内 VPS** 的 **Headscale + Headscale UI + DERP 一键安装项目**。
 
-这个项目不是另起炉灶重写方案，而是基于你已经验证可用的两份脚本，整理成更适合交付、维护和 GitHub 发布的项目结构。
+基于已经实际跑通的方案整理而来，目标不是只给出几个能跑的命令，而是做成一套更适合长期维护、公开分享和 GitHub 发布的脚本项目。
+
+仓库地址：
+
+```text
+https://github.com/slobys/headscale-one-click
+```
+
+## 一句话说明
+
+这是一个适合国内服务器使用的 Headscale + Headscale UI + DERP 一键安装项目，支持本地安装包优先、菜单管理、版本检查、修复脚本，以及可选启用 DERP 防白嫖校验。
 
 ## 项目亮点
 
@@ -18,7 +28,18 @@
 
 ## 快速开始
 
-### 方式一：直接从 GitHub 拉取后安装
+如果你只想先跑起来，直接用下面这组命令即可：
+
+```bash
+git clone https://github.com/slobys/headscale-one-click.git
+cd headscale-one-click
+chmod +x install.sh update.sh uninstall.sh repair.sh menu.sh check-updates.sh
+sudo ./install.sh
+```
+
+如果你是国内服务器用户，强烈建议提前把安装包传到 `/root/` 或项目目录，再执行安装脚本。
+
+### 方式一：直接从 GitHub 拉取后安装（推荐）
 
 ```bash
 git clone https://github.com/slobys/headscale-one-click.git
@@ -47,6 +68,12 @@ chmod +x check-updates.sh
 
 ### 国内服务器强烈建议先准备本地安装包
 
+这是这个项目成功率最高的一种用法，尤其适合：
+
+- 阿里云 / 腾讯云 / 华为云等国内云服务器
+- GitHub / go.dev / tailscale.com 偶发访问不稳定的环境
+- 想减少安装中途失败概率的场景
+
 上传到 `/root/` 或脚本当前目录：
 
 - `go1.26.1.linux-amd64.tar.gz` 或 arm64 对应版本
@@ -58,12 +85,6 @@ chmod +x check-updates.sh
 ---
 
 ## 项目说明
-
-仓库地址：
-
-```text
-https://github.com/slobys/headscale-one-click
-```
 
 这个项目整合了两部分：
 
@@ -90,6 +111,16 @@ sudo ./install.sh
 - API Key 生成
 
 ---
+
+## 适合谁用
+
+这个项目尤其适合以下场景：
+
+- 想在国内 VPS / 国内云服务器上部署 Headscale
+- 想同时配好 Headscale UI 和自建 DERP
+- 不想再手工拆开多个脚本逐步执行
+- 想做成可长期维护、可上传 GitHub 的脚本项目
+- 想控制 DERP 被公网其他客户端白嫖的风险
 
 ## 适用环境
 
@@ -226,6 +257,8 @@ sudo ./install.sh
 ---
 
 ## DERP 防白嫖说明
+
+这是这个项目比较实用、也比较有辨识度的一个功能点。
 
 你原方案里的“防白嫖”功能，本质上是通过为 `derp` 增加：
 
