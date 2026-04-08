@@ -19,11 +19,28 @@ die() {
 
 [[ "${EUID}" -eq 0 ]] || die "请使用 root 用户运行卸载脚本。"
 
+PANEL_STATE_FILE="/etc/headscale-one-click/panel.env"
+HEADPLANE_DIR="/opt/headplane"
+HEADPLANE_CONFIG_DIR="/etc/headplane"
+HEADPLANE_DATA_DIR="/var/lib/headplane"
+HEADPLANE_SERVICE="/etc/systemd/system/headplane.service"
+
+load_panel_state() {
+  PANEL_TYPE="headache-ui"
+
+  if [[ -f "$PANEL_STATE_FILE" ]]; then
+    # shellcheck disable=SC1090
+    source "$PANEL_STATE_FILE"
+  fi
+}
+
+load_panel_state
+
 cat <<EOF
 你即将卸载以下内容：
 - DERP 服务与证书
 - Headscale 服务
-- Headscale Web UI 文件
+- 当前已安装的管理面板文件
 - 当前脚本生成的 Nginx 独立站点配置
 - /var/www/derp.json
 
@@ -45,14 +62,21 @@ systemctl stop derp 2>/dev/null || true
 systemctl disable derp 2>/dev/null || true
 systemctl stop headscale 2>/dev/null || true
 systemctl disable headscale 2>/dev/null || true
+systemctl stop headplane 2>/dev/null || true
+systemctl disable headplane 2>/dev/null || true
 
 info "删除 DERP 服务文件与证书..."
 rm -f /etc/systemd/system/derp.service
 rm -rf /etc/derp
 
-info "删除 Headscale Web UI 与 DERP JSON..."
+info "删除面板文件与 DERP JSON..."
 rm -rf /var/www/web
 rm -f /var/www/derp.json
+rm -rf "$HEADPLANE_DIR"
+rm -rf "$HEADPLANE_CONFIG_DIR"
+rm -rf "$HEADPLANE_DATA_DIR"
+rm -f "$HEADPLANE_SERVICE"
+rm -f "$PANEL_STATE_FILE"
 
 info "删除脚本生成的 Nginx 配置..."
 rm -f /etc/nginx/sites-enabled/headscale-one-click.conf

@@ -19,6 +19,21 @@ die() {
 
 [[ "${EUID}" -eq 0 ]] || die "请使用 root 用户运行修复脚本。"
 
+PANEL_STATE_FILE="/etc/headscale-one-click/panel.env"
+HEADPLANE_DIR="/opt/headplane"
+HEADPLANE_CONFIG="/etc/headplane/config.yaml"
+
+load_panel_state() {
+  PANEL_TYPE="headache-ui"
+
+  if [[ -f "$PANEL_STATE_FILE" ]]; then
+    # shellcheck disable=SC1090
+    source "$PANEL_STATE_FILE"
+  fi
+}
+
+load_panel_state
+
 info "开始执行基础修复流程..."
 
 if ! command -v nginx >/dev/null 2>&1; then
@@ -39,10 +54,24 @@ else
   info "检测到 Headscale 配置文件。"
 fi
 
-if [[ ! -d /var/www/web ]]; then
-  warn "未找到 /var/www/web，Headscale Web UI 目录可能缺失。"
+if [[ "$PANEL_TYPE" == "headplane" ]]; then
+  if [[ ! -d "$HEADPLANE_DIR" ]]; then
+    warn "未找到 ${HEADPLANE_DIR}，Headplane 程序目录可能缺失。"
+  else
+    info "检测到 Headplane 程序目录。"
+  fi
+
+  if [[ ! -f "$HEADPLANE_CONFIG" ]]; then
+    warn "未找到 ${HEADPLANE_CONFIG}，Headplane 配置可能缺失。"
+  else
+    info "检测到 Headplane 配置文件。"
+  fi
 else
-  info "检测到 Headscale Web UI 目录。"
+  if [[ ! -d /var/www/web ]]; then
+    warn "未找到 /var/www/web，Headscale Web UI 目录可能缺失。"
+  else
+    info "检测到 Headscale Web UI 目录。"
+  fi
 fi
 
 if [[ -f /etc/nginx/sites-available/headscale-one-click.conf ]]; then
@@ -66,6 +95,7 @@ systemctl daemon-reload || true
 systemctl restart derp 2>/dev/null || true
 systemctl restart headscale 2>/dev/null || true
 systemctl restart nginx 2>/dev/null || true
+systemctl restart headplane 2>/dev/null || true
 
 info "输出服务状态摘要..."
 systemctl --no-pager --full status derp 2>/dev/null || true
@@ -73,6 +103,8 @@ echo
 systemctl --no-pager --full status headscale 2>/dev/null || true
 echo
 systemctl --no-pager --full status nginx 2>/dev/null || true
+echo
+systemctl --no-pager --full status headplane 2>/dev/null || true
 
 echo
 success "基础修复流程执行完成。"

@@ -11,6 +11,14 @@ NGINX_ENABLED="/etc/nginx/sites-enabled/${NGINX_SITE_NAME}.conf"
 HEADSCALE_CONFIG="/etc/headscale/config.yaml"
 HEADSCALE_UI_DIR="/var/www/web"
 DERP_JSON="/var/www/derp.json"
+PANEL_STATE_DIR="/etc/headscale-one-click"
+PANEL_STATE_FILE="${PANEL_STATE_DIR}/panel.env"
+HEADPLANE_DIR="/opt/headplane"
+HEADPLANE_CONFIG_DIR="/etc/headplane"
+HEADPLANE_CONFIG="${HEADPLANE_CONFIG_DIR}/config.yaml"
+HEADPLANE_SERVICE="/etc/systemd/system/headplane.service"
+HEADPLANE_DATA_DIR="/var/lib/headplane"
+HEADPLANE_PORT="3000"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -42,6 +50,10 @@ command_exists() {
   command -v "$1" >/dev/null 2>&1
 }
 
+version_ge() {
+  [[ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n 1)" == "$2" ]]
+}
+
 prompt_value() {
   local var_name="$1"
   local prompt_text="$2"
@@ -51,6 +63,31 @@ prompt_value() {
   read -r -p "${prompt_text} [默认: ${default_value}]: " input_value || true
   input_value="${input_value:-$default_value}"
   printf -v "$var_name" '%s' "$input_value"
+}
+
+prompt_panel_type() {
+  local choice=""
+
+  echo
+  echo "请选择要安装的面板："
+  echo "1) headache-ui / headscale-ui（默认，保持当前脚本行为）"
+  echo "2) Headplane（原生部署，访问路径 /admin）"
+  read -r -p "请输入选项 [默认: 1]: " choice || true
+  choice="${choice:-1}"
+
+  case "$choice" in
+    1)
+      PANEL_TYPE="headache-ui"
+      PANEL_PATH="/web"
+      ;;
+    2)
+      PANEL_TYPE="headplane"
+      PANEL_PATH="/admin"
+      ;;
+    *)
+      die "无效的面板选项：${choice}"
+      ;;
+  esac
 }
 
 validate_port() {
@@ -150,6 +187,14 @@ install_base_packages() {
 prepare_workdir() {
   mkdir -p "$WORKDIR"
   mkdir -p "$DERP_DIR"
+}
+
+save_panel_state() {
+  mkdir -p "$PANEL_STATE_DIR"
+  cat > "$PANEL_STATE_FILE" <<EOF
+PANEL_TYPE=${PANEL_TYPE}
+PANEL_PATH=${PANEL_PATH}
+EOF
 }
 
 find_or_download_file() {
@@ -319,6 +364,116 @@ install_headscale_ui() {
   success "Headscale Web UI 部署完成。"
 }
 
+install_headplane_runtime() {
+  local node_version=""
+  local node_major=""
+  local pnpm_version=""
+
+  if command_exists node; then
+    node_version="$(node -v | sed 's/^v//')"
+    node_major="$(node -v | sed -E 's/^v([0-9]+).*/\1/')"
+  fi
+
+  if [[ -n "$node_major" && "$node_major" -eq 22 ]] && version_ge "$node_version" "22.18.0"; then
+    info "检测到兼容的 Node.js v${node_version}，跳过安装 Node.js。"
+  else
+    info "安装 Headplane 所需 Node.js 22（要求 >=22.18 且 <23）..."
+    apt update
+    DEBIAN_FRONTEND=noninteractive apt install -y gnupg build-essential
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+    DEBIAN_FRONTEND=noninteractive apt install -y nodejs
+    node_version="$(node -v | sed 's/^v//')"
+    node_major="$(node -v | sed -E 's/^v([0-9]+).*/\1/')"
+  fi
+
+  [[ -n "$node_major" && "$node_major" -eq 22 ]] && version_ge "$node_version" "22.18.0" || die "当前 Node.js 版本不兼容 Headplane：v${node_version:-unknown}。请使用 22.18.x 到 22.x 最新稳定版。"
+
+  if command_exists pnpm; then
+    pnpm_version="$(pnpm -v)"
+    if version_ge "$pnpm_version" "10.4.0"; then
+      info "检测到兼容的 pnpm ${pnpm_version}，跳过安装 pnpm。"
+    else
+      info "检测到 pnpm ${pnpm_version}，但版本过低，升级到 10.4.0 ..."
+      npm install -g pnpm@10.4.0
+    fi
+  else
+    info "安装 pnpm 10.4.0 ..."
+    npm install -g pnpm@10.4.0
+  fi
+
+  command_exists node || die "Node.js 安装失败。"
+  command_exists pnpm || die "pnpm 安装失败。"
+}
+
+install_headplane() {
+  local headplane_version="$1"
+  local repo_url="https://github.com/tale/headplane.git"
+  local cookie_secret=""
+
+  info "开始安装 Headplane ${headplane_version}（原生模式）..."
+  install_headplane_runtime
+
+  rm -rf "$HEADPLANE_DIR"
+  git clone --depth 1 --branch "v${headplane_version}" "$repo_url" "$HEADPLANE_DIR"
+
+  pushd "$HEADPLANE_DIR" >/dev/null
+  pnpm install --frozen-lockfile
+  pnpm build
+  popd >/dev/null
+
+  mkdir -p "$HEADPLANE_CONFIG_DIR" "$HEADPLANE_DATA_DIR"
+  cookie_secret="$(openssl rand -hex 16)"
+
+  cat > "$HEADPLANE_CONFIG" <<EOF
+server:
+  host: "127.0.0.1"
+  port: ${HEADPLANE_PORT}
+  base_url: "http://${SERVER_IP}:${HEADSCALE_PORT}"
+  cookie_secret: "${cookie_secret}"
+  cookie_secure: false
+  cookie_max_age: 86400
+  data_path: "${HEADPLANE_DATA_DIR}"
+
+headscale:
+  url: "http://127.0.0.1:8080"
+  public_url: "http://${SERVER_IP}:${HEADSCALE_PORT}"
+  config_path: "${HEADSCALE_CONFIG}"
+  config_strict: false
+
+integration:
+  docker:
+    enabled: false
+  kubernetes:
+    enabled: false
+  proc:
+    enabled: true
+EOF
+
+  cat > "$HEADPLANE_SERVICE" <<EOF
+[Unit]
+Description=Headplane Service
+After=network.target headscale.service
+Requires=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=${HEADPLANE_DIR}
+Environment=HEADPLANE_CONFIG_PATH=${HEADPLANE_CONFIG}
+ExecStart=/usr/bin/node ${HEADPLANE_DIR}/build/server/index.js
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable headplane
+  systemctl restart headplane
+  success "Headplane 部署完成。"
+}
+
 configure_nginx() {
   info "配置 Nginx..."
 
@@ -335,6 +490,52 @@ server {
  listen ${HEADSCALE_PORT};
  listen [::]:${HEADSCALE_PORT};
  server_name ${SERVER_IP};
+EOF
+
+  if [[ "$PANEL_TYPE" == "headplane" ]]; then
+    cat >> "$NGINX_AVAILABLE" <<EOF
+ location /admin/ {
+ proxy_pass http://127.0.0.1:${HEADPLANE_PORT};
+ proxy_http_version 1.1;
+ proxy_set_header Upgrade \$http_upgrade;
+ proxy_set_header Connection \$connection_upgrade;
+ proxy_set_header Host \$host;
+ proxy_buffering off;
+ proxy_set_header X-Real-IP \$remote_addr;
+ proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+ proxy_set_header X-Forwarded-Proto \$scheme;
+ }
+ location / {
+ proxy_pass http://127.0.0.1:8080;
+ proxy_http_version 1.1;
+ proxy_set_header Upgrade \$http_upgrade;
+ proxy_set_header Connection \$connection_upgrade;
+ proxy_set_header Host \$host;
+ proxy_buffering off;
+ proxy_set_header X-Real-IP \$remote_addr;
+ proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+ proxy_set_header X-Forwarded-Proto \$scheme;
+ add_header Strict-Transport-Security "max-age=15552000; includeSubDomains" always;
+ }
+}
+server {
+ listen 80;
+ listen [::]:80;
+ server_name 127.0.0.1;
+ root /var/www;
+
+ index index.html index.htm index.nginx-debian.html;
+ location /d {
+ alias /var/www;
+ autoindex on;
+ }
+ location / {
+ try_files \$uri \$uri/ =404;
+ }
+}
+EOF
+  else
+    cat >> "$NGINX_AVAILABLE" <<EOF
  location / {
  proxy_pass http://127.0.0.1:8080;
  proxy_http_version 1.1;
@@ -367,6 +568,7 @@ server {
  }
 }
 EOF
+  fi
 
   ln -sfn "$NGINX_AVAILABLE" "$NGINX_ENABLED"
 
@@ -449,12 +651,14 @@ enable_verify_clients_if_needed() {
 }
 
 show_summary() {
+  local panel_url="http://${SERVER_IP}:${HEADSCALE_PORT}${PANEL_PATH}"
+
   cat <<EOF
 
 ${GREEN}安装完成。${NC}
 
 访问地址：
-- Headscale Web UI: http://${SERVER_IP}:${HEADSCALE_PORT}/web
+- 管理面板（${PANEL_TYPE}）: ${panel_url}
 
 客户端接入命令：
   tailscale up --login-server=http://${SERVER_IP}:${HEADSCALE_PORT}
@@ -489,6 +693,10 @@ main() {
   prompt_value HTTP_PORT "请输入HTTP端口" "3340"
   prompt_value GO_VERSION "请输入 Go 版本（不要带 go 前缀，例如 1.26.1）" "1.26.1"
   prompt_value HEADSCALE_VERSION "请输入 Headscale 版本" "0.28.0"
+  prompt_panel_type
+  if [[ "$PANEL_TYPE" == "headplane" ]]; then
+    prompt_value HEADPLANE_VERSION "请输入 Headplane 版本" "0.6.2"
+  fi
 
   validate_ipv4 "$SERVER_IP" || die "服务器IP格式不正确。"
   validate_ipv4 "$IP_PREFIX" || die "IP前缀格式不正确，应类似 100.64.0.0"
@@ -502,9 +710,17 @@ main() {
   install_derp
   install_tailscale
   install_headscale "$HEADSCALE_VERSION"
-  install_headscale_ui
+  if [[ "$PANEL_TYPE" == "headplane" ]]; then
+    install_headplane "$HEADPLANE_VERSION"
+  else
+    install_headscale_ui
+  fi
   configure_nginx
   configure_headscale
+  if [[ "$PANEL_TYPE" == "headplane" ]]; then
+    systemctl restart headplane
+  fi
+  save_panel_state
   create_apikey
   enable_verify_clients_if_needed
   show_summary

@@ -31,6 +31,10 @@ fetch_latest_headscale_ui() {
   curl -fsSL https://api.github.com/repos/gurucomputing/headscale-ui/releases/latest | grep '"tag_name"' | head -n 1 | sed -E 's/.*"v?([^"]+)".*/\1/'
 }
 
+fetch_latest_headplane() {
+  curl -fsSL https://api.github.com/repos/tale/headplane/releases/latest | grep '"tag_name"' | head -n 1 | sed -E 's/.*"v?([^"]+)".*/\1/'
+}
+
 main() {
   require_cmd curl
   require_cmd sed
@@ -41,16 +45,19 @@ main() {
   local go_version="unknown"
   local headscale_version="unknown"
   local headscale_ui_version="unknown"
+  local headplane_version="unknown"
 
   go_version="$(fetch_latest_go 2>/dev/null || echo unknown)"
   headscale_version="$(fetch_latest_headscale 2>/dev/null || echo unknown)"
   headscale_ui_version="$(fetch_latest_headscale_ui 2>/dev/null || echo unknown)"
+  headplane_version="$(fetch_latest_headplane 2>/dev/null || echo unknown)"
 
   echo
   echo "当前建议关注的上游最新版本："
   echo "- Go:            ${go_version}"
   echo "- Headscale:     ${headscale_version}"
-  echo "- Headscale Web UI: ${headscale_ui_version}"
+  echo "- headache-ui:   ${headscale_ui_version}"
+  echo "- Headplane:     ${headplane_version}"
   echo
 
   warn "注意：此脚本只负责检查最新版本，不会自动修改 install.sh。"

@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 BASE_DIR="$(cd "$(dirname "$0")" && pwd)"
+PANEL_STATE_FILE="/etc/headscale-one-click/panel.env"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -33,28 +34,44 @@ show_status() {
   systemctl status headscale --no-pager 2>/dev/null || true
   echo
   systemctl status nginx --no-pager 2>/dev/null || true
+  echo
+  systemctl status headplane --no-pager 2>/dev/null || true
 }
 
 show_access_info() {
+  local panel_type="headache-ui"
+  local panel_path="/web"
+
+  if [[ -f "$PANEL_STATE_FILE" ]]; then
+    # shellcheck disable=SC1090
+    source "$PANEL_STATE_FILE"
+  fi
+
   echo
   info "常用信息"
   echo "- Headscale 配置文件: /etc/headscale/config.yaml"
   echo "- DERP 服务文件: /etc/systemd/system/derp.service"
   echo "- DERP JSON: /var/www/derp.json"
-  echo "- Headscale Web UI 目录: /var/www/web"
+  echo "- 当前面板类型: ${PANEL_TYPE:-$panel_type}"
+  echo "- 当前面板路径: ${PANEL_PATH:-$panel_path}"
+  echo "- headache-ui 目录: /var/www/web"
+  echo "- Headplane 目录: /opt/headplane"
+  echo "- Headplane 配置: /etc/headplane/config.yaml"
   echo "- Nginx 站点配置: /etc/nginx/sites-available/headscale-one-click.conf"
   echo
   echo "常用命令："
   echo "- 查看 DERP 日志: journalctl -u derp -f"
   echo "- 查看 Headscale 日志: journalctl -u headscale -f"
   echo "- 查看 Nginx 日志: journalctl -u nginx -f"
+  echo "- 查看 Headplane 日志: journalctl -u headplane -f"
 }
 
 restart_services() {
-  info "重启 derp / headscale / nginx ..."
+  info "重启 derp / headscale / nginx / headplane ..."
   systemctl restart derp 2>/dev/null || true
   systemctl restart headscale 2>/dev/null || true
   systemctl restart nginx 2>/dev/null || true
+  systemctl restart headplane 2>/dev/null || true
   success "服务重启完成。"
 }
 

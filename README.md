@@ -1,6 +1,6 @@
 # headscale-one-click
 
-一个面向 **中国大陆云服务器 / VPS** 的 **Headscale + Headscale Web UI + DERP 一键安装项目**。
+一个面向 **中国大陆云服务器 / VPS** 的 **Headscale + 可选管理面板 + DERP 一键安装项目**。
 
 基于已经实际跑通的方案整理而来，目标不是只给出几个能跑的命令，而是做成一套更适合长期维护、公开分享和 GitHub 发布的脚本项目。
 
@@ -12,11 +12,12 @@ https://github.com/slobys/headscale-one-click
 
 ## 一句话说明
 
-这是一个适合中国大陆云服务器使用的 Headscale + Headscale Web UI + DERP 一键安装项目，支持本地安装文件优先、菜单管理、版本检查、修复脚本，以及可选启用 DERP 客户端校验。
+这是一个适合中国大陆云服务器使用的 Headscale + 可选管理面板 + DERP 一键安装项目，默认支持现有的 headache-ui，并可选安装 Headplane，支持本地安装文件优先、菜单管理、版本检查、修复脚本，以及可选启用 DERP 客户端校验。
 
 ## 项目亮点
 
-- 单脚本安装：整合 DERP、Headscale、Headscale Web UI、Nginx 配置
+- 单脚本安装：整合 DERP、Headscale、管理面板、Nginx 配置
+- 面板可选：默认保持现有 headache-ui 安装方式，也可选 Headplane（原生模式）
 - 中国大陆网络友好：支持本地安装文件优先，尽量降低外部下载源不稳定带来的失败率
 - 保留原方案思路：尽量贴近已验证可用的部署做法
 - 带维护脚本：包含安装、更新、卸载、修复、菜单管理、版本检查
@@ -104,7 +105,7 @@ sudo ./install.sh
 - DERP 编译和部署
 - Tailscale 客户端安装
 - Headscale 安装
-- Headscale Web UI 解压部署
+- 按所选面板完成部署（headache-ui 或 Headplane）
 - Nginx 配置
 - Headscale 配置修改
 - DERP JSON 生成
@@ -117,7 +118,7 @@ sudo ./install.sh
 这个项目尤其适合以下场景：
 
 - 想在中国大陆 VPS / 云服务器上部署 Headscale
-- 想同时配好 Headscale Web UI 和自建 DERP
+- 想同时配好 Headscale 管理面板和自建 DERP
 - 不想再手工拆开多个脚本逐步执行
 - 想做成可长期维护、可上传 GitHub 的脚本项目
 - 想控制 DERP 被公网其他客户端白嫖的风险
@@ -256,11 +257,14 @@ apt upgrade -y
 - HTTP 端口
 - Go 版本
 - Headscale 版本
+- 面板类型（默认 headache-ui，也可选 Headplane）
+- 如果选择 Headplane，会继续询问 Headplane 版本
 
 说明：
 
 - Go 和 Headscale 这里填写的是版本号
-- Headscale Web UI 压缩包文件名固定为 `headscale-ui.zip`，无需额外输入
+- 如果你选择默认的 headache-ui，压缩包文件名固定为 `headscale-ui.zip`
+- 如果你选择 Headplane，脚本会自动安装 Node.js 22、pnpm 10.4.x，并在本机原生构建
 
 常见示例：
 
@@ -272,7 +276,18 @@ apt upgrade -y
 - HTTP端口：`3340`
 - Go版本：`1.26.1`
 - Headscale版本：`0.28.0`
+- 面板类型：默认选 `1`
 - Headscale Web UI 压缩包固定为：`headscale-ui.zip`
+
+### 面板选择说明
+
+当前脚本支持两种面板：
+
+- `headache-ui`，默认选项，保持当前脚本原有行为不变
+- `Headplane`，原生部署方式，访问路径为 `/admin`
+
+为了不影响现有可用方案，脚本默认仍然走 `headache-ui -> /web` 这条路线。
+只有在安装时明确选择 Headplane，才会额外安装其依赖和服务。
 
 ---
 
@@ -440,9 +455,9 @@ sudo ./update.sh
 
 当前 `update.sh` 主要用于：
 
-- 重新部署 Headscale Web UI
+- 根据当前已安装面板执行更新
 - 校验并重启 Nginx
-- 重启 Headscale / DERP 服务
+- 重启 Headscale / DERP / Headplane（如果已安装）服务
 
 ### 卸载
 
@@ -454,7 +469,7 @@ sudo ./uninstall.sh
 
 - derp.service
 - DERP 证书
-- Headscale Web UI
+- 当前已安装的管理面板
 - 当前脚本生成的 Nginx 独立站点配置
 - Headscale
 
@@ -468,9 +483,9 @@ sudo ./repair.sh
 
 - 检查 nginx 是否存在
 - 检查 DERP / Headscale 配置文件是否存在
-- 检查 Headscale Web UI 目录是否存在
+- 根据当前面板类型检查 headache-ui 或 Headplane 相关目录
 - 校验 Nginx 配置
-- 重启 derp / headscale / nginx
+- 重启 derp / headscale / nginx / headplane（如果已安装）
 
 ### 菜单管理
 

@@ -19,6 +19,20 @@ die() {
 
 [[ "${EUID}" -eq 0 ]] || die "请使用 root 用户运行更新脚本。"
 
+PANEL_STATE_FILE="/etc/headscale-one-click/panel.env"
+HEADPLANE_DIR="/opt/headplane"
+HEADPLANE_SERVICE="/etc/systemd/system/headplane.service"
+
+load_panel_state() {
+  PANEL_TYPE="headache-ui"
+  PANEL_PATH="/web"
+
+  if [[ -f "$PANEL_STATE_FILE" ]]; then
+    # shellcheck disable=SC1090
+    source "$PANEL_STATE_FILE"
+  fi
+}
+
 cat <<EOF
 这个 update.sh 适合做以下事情：
 - 重新部署 Headscale Web UI
@@ -42,18 +56,42 @@ WORKDIR="/usr/local/src/headscale-one-click"
 HEADSCALE_UI_DIR="/var/www/web"
 NGINX_CONF="/etc/nginx/sites-available/default"
 
-read -r -p "请输入 Headscale Web UI 压缩包文件名 [默认: headscale-ui.zip]: " UI_ZIP
-UI_ZIP="${UI_ZIP:-headscale-ui.zip}"
+load_panel_state
 
-if [[ -f "/root/${UI_ZIP}" ]]; then
-  info "检测到 /root/${UI_ZIP}，准备更新 Headscale Web UI。"
-  mkdir -p "$WORKDIR"
-  cp -f "/root/${UI_ZIP}" "$WORKDIR/${UI_ZIP}"
-  rm -rf "$HEADSCALE_UI_DIR"
-  unzip -o "$WORKDIR/${UI_ZIP}" -d /var/www >/dev/null
-  success "Headscale Web UI 更新完成。"
+if [[ "$PANEL_TYPE" == "headplane" ]]; then
+  read -r -p "请输入要更新到的 Headplane 版本 [默认: 0.6.2]: " HEADPLANE_VERSION
+  HEADPLANE_VERSION="${HEADPLANE_VERSION:-0.6.2}"
+
+  info "准备更新 Headplane 到 v${HEADPLANE_VERSION} ..."
+  [[ -d "$HEADPLANE_DIR" ]] || die "未检测到 ${HEADPLANE_DIR}，当前看起来不像已安装 Headplane。"
+
+  pushd "$HEADPLANE_DIR" >/dev/null
+  git fetch --tags origin
+  git checkout "v${HEADPLANE_VERSION}"
+  pnpm install --frozen-lockfile
+  pnpm build
+  popd >/dev/null
+
+  if [[ -f "$HEADPLANE_SERVICE" ]]; then
+    systemctl daemon-reload
+    systemctl restart headplane
+  fi
+
+  success "Headplane 更新完成。"
 else
-  warn "未检测到 /root/${UI_ZIP}，跳过 Headscale Web UI 更新。"
+  read -r -p "请输入 Headscale Web UI 压缩包文件名 [默认: headscale-ui.zip]: " UI_ZIP
+  UI_ZIP="${UI_ZIP:-headscale-ui.zip}"
+
+  if [[ -f "/root/${UI_ZIP}" ]]; then
+    info "检测到 /root/${UI_ZIP}，准备更新 Headscale Web UI。"
+    mkdir -p "$WORKDIR"
+    cp -f "/root/${UI_ZIP}" "$WORKDIR/${UI_ZIP}"
+    rm -rf "$HEADSCALE_UI_DIR"
+    unzip -o "$WORKDIR/${UI_ZIP}" -d /var/www >/dev/null
+    success "Headscale Web UI 更新完成。"
+  else
+    warn "未检测到 /root/${UI_ZIP}，跳过 Headscale Web UI 更新。"
+  fi
 fi
 
 if [[ -f "$NGINX_CONF" ]]; then
@@ -64,6 +102,7 @@ fi
 
 systemctl restart headscale 2>/dev/null || true
 systemctl restart derp 2>/dev/null || true
+systemctl restart headplane 2>/dev/null || true
 
 success "更新流程执行完成。"
 warn "如果你后续要升级 Headscale 本体版本，建议先手动备份配置，再单独做版本更新。"
