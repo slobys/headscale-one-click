@@ -445,6 +445,7 @@ integration:
     enabled: false
   kubernetes:
     enabled: false
+    pod_name: "headscale"
   proc:
     enabled: true
 EOF
