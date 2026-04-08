@@ -495,6 +495,9 @@ EOF
 
   if [[ "$PANEL_TYPE" == "headplane" ]]; then
     cat >> "$NGINX_AVAILABLE" <<EOF
+ location = /admin {
+ return 301 /admin/;
+ }
  location /admin/ {
  proxy_pass http://127.0.0.1:${HEADPLANE_PORT};
  proxy_http_version 1.1;
