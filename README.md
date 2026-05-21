@@ -12,12 +12,12 @@ https://github.com/slobys/headscale-one-click
 
 ## 一句话说明
 
-这是一个适合中国大陆云服务器使用的 Headscale + 可选管理面板 + DERP 一键安装项目，默认支持现有的 headache-ui，并可选安装 Headplane，支持本地安装文件优先、菜单管理、版本检查、修复脚本，以及可选启用 DERP 客户端校验。
+这是一个适合中国大陆云服务器使用的 Headscale + 可选管理面板 + DERP 一键安装项目，默认支持现有的 headache-ui，并可选安装 Headplane（当前视为实验性），支持本地安装文件优先、菜单管理、版本检查、修复脚本，以及可选启用 DERP 客户端校验。
 
 ## 项目亮点
 
 - 单脚本安装：整合 DERP、Headscale、管理面板、Nginx 配置
-- 面板可选：默认保持现有 headache-ui 安装方式，也可选 Headplane（原生模式）
+- 面板可选：默认保持现有 headache-ui 安装方式，也可选 Headplane（原生模式，当前视为实验性）
 - 中国大陆网络友好：支持本地安装文件优先，尽量降低外部下载源不稳定带来的失败率
 - 保留原方案思路：尽量贴近已验证可用的部署做法
 - 带维护脚本：包含安装、更新、卸载、修复、菜单管理、版本检查
@@ -38,7 +38,7 @@ chmod +x install.sh update.sh uninstall.sh repair.sh menu.sh check-updates.sh
 sudo ./install.sh
 ```
 
-如果部署环境位于中国大陆网络，强烈建议提前把安装文件传到 `/root/` 或项目目录，再执行安装脚本。
+如果部署环境位于中国大陆网络，脚本会自动优先尝试国内友好的下载线路；你也可以提前把安装文件传到 `/root/` 或项目目录，脚本会优先使用本地文件。
 
 ### 方式一：直接从 GitHub 拉取后安装（推荐）
 
@@ -67,21 +67,22 @@ chmod +x check-updates.sh
 ./check-updates.sh
 ```
 
-### 中国大陆服务器环境强烈建议先准备本地安装文件
+### 中国大陆服务器环境下载说明
 
-这是本项目成功率最高的一种用法，尤其适合：
+脚本默认会自动下载所需安装文件，并优先尝试更适合中国大陆网络的线路。尤其适合：
 
 - 阿里云 / 腾讯云 / 华为云等中国大陆云服务器
 - GitHub / go.dev / tailscale.com 偶发访问不稳定的环境
 - 想减少安装中途失败概率的场景
 
-上传到 `/root/` 或脚本当前目录：
+当前会自动拉取：
 
-- `go1.26.1.linux-amd64.tar.gz` 或 arm64 对应版本
+- `go1.26.3.linux-amd64.tar.gz` 或 arm64 对应版本
 - `headscale_0.28.0_linux_amd64.deb` 或 arm64 对应版本
 - `headscale-ui.zip`
+- Headplane 源码包（选择 Headplane 时）
 
-这样会明显提高国内服务器安装成功率。
+如果服务器网络仍然无法下载，也可以把这些文件上传到 `/root/` 或脚本当前目录，脚本会优先使用本地文件。
 
 ---
 
@@ -138,7 +139,7 @@ sudo ./install.sh
 
 ## 中国大陆服务器使用说明
 
-本项目针对 **中国大陆服务器可安装** 场景，做了两个关键处理：
+本项目针对 **中国大陆服务器可安装** 场景，做了几个关键处理：
 
 ### 1. Go 使用国内代理
 
@@ -148,18 +149,24 @@ sudo ./install.sh
 go env -w GOPROXY=https://goproxy.cn,direct
 ```
 
-### 2. 安装文件优先读取本地文件
+### 2. 安装文件自动下载并使用备用线路
 
-如果你提前把这些文件传到 `/root/` 或当前目录，脚本会优先使用本地文件，不强依赖外网下载。
+Go 会优先尝试 `golang.google.cn`，GitHub Release 文件会优先尝试 GitHub 加速线路，再回退到官方地址。
 
-建议你提前准备：
+脚本会自动下载：
 
-- `go1.26.1.linux-amd64.tar.gz` 或 arm64 对应版本
+- `go1.26.3.linux-amd64.tar.gz` 或 arm64 对应版本
 - `headscale_0.28.0_linux_amd64.deb` 或 arm64 对应版本
 - `headscale-ui.zip`
+- Headplane 源码包（选择 Headplane 时）
 
-这样在中国大陆服务器环境中的安装成功率会高很多。
+### 3. 本地文件仍然优先
 
+如果你已经把安装文件传到 `/root/` 或当前目录，脚本会优先使用本地文件，不强依赖外网下载。
+
+### 4. Headplane 依赖使用国内镜像
+
+选择 Headplane 时，脚本会把 npm/pnpm registry 设置为 `https://registry.npmmirror.com`，减少前端依赖安装失败概率。
 ---
 
 ## 文件结构
@@ -274,20 +281,27 @@ apt upgrade -y
 - IP前缀：`100.64.0.0`
 - DERP端口：`12345`
 - HTTP端口：`3340`
-- Go版本：`1.26.1`
+- Go版本：`1.26.3`
 - Headscale版本：`0.28.0`
 - 面板类型：默认选 `1`
 - Headscale Web UI 压缩包固定为：`headscale-ui.zip`
+- 如果选择 Headplane，默认版本为：`0.6.3`
+
+这里的 Headscale 端口是对外访问端口，由 Nginx 监听并反代到本机内部 Headscale 服务。
+脚本会把 Headscale 内部监听端口固定为 `127.0.0.1:18080`，避免和 Nginx 默认对外端口 `8080` 冲突。
 
 ### 面板选择说明
 
 当前脚本支持两种面板：
 
 - `headache-ui`，默认选项，保持当前脚本原有行为不变
-- `Headplane`，原生部署方式，访问路径为 `/admin`
+- `Headplane`，原生部署方式，访问路径为 `/admin`，**当前视为实验性**
 
 为了不影响现有可用方案，脚本默认仍然走 `headache-ui -> /web` 这条路线。
 只有在安装时明确选择 Headplane，才会额外安装其依赖和服务。
+
+> 注意：目前 Headplane 在部分环境下虽然服务端链路可用，但浏览器侧登录流程仍可能异常。
+> 因此现阶段不应视为稳定可交付方案，更适合测试、验证和后续迭代。
 
 ---
 

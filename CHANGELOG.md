@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.5.6 - 2026-05-21
+
+### Changed
+- `install.sh` 默认 Go 版本更新为 `1.26.3`
+- `install.sh` 与 `update.sh` 默认 Headplane 版本更新为 `0.6.3`，同步上游安全修复版本
+- `install.sh` 将 Headscale 内部监听端口固定为 `127.0.0.1:18080`，避免和 Nginx 对外访问端口冲突
+- `install.sh` 调整安装顺序，先修改 Headscale 监听端口再启动 Nginx 反代
+- `install.sh` 新增多线路下载逻辑，Go、Headscale、headscale-ui 与 Headplane 源码包会自动尝试国内友好线路
+- `install.sh` 为 Headplane 依赖安装设置 npm/pnpm 国内镜像
+- `update.sh` 支持自动下载 headscale-ui 与 Headplane 源码包，不再要求手动上传压缩包或依赖 Git 仓库目录
+- `README.md` 同步更新本地安装文件和默认版本说明
+
 ## v1.5.5 - 2026-04-07
 
 ### Changed

@@ -22,6 +22,7 @@ die() {
 PANEL_STATE_FILE="/etc/headscale-one-click/panel.env"
 HEADPLANE_DIR="/opt/headplane"
 HEADPLANE_SERVICE="/etc/systemd/system/headplane.service"
+HEADSCALE_UI_VERSION="2026.03.17"
 
 load_panel_state() {
   PANEL_TYPE="headache-ui"
@@ -31,6 +32,39 @@ load_panel_state() {
     # shellcheck disable=SC1090
     source "$PANEL_STATE_FILE"
   fi
+}
+
+find_or_download_file() {
+  local filename="$1"
+  local output_path="$2"
+  shift 2
+  local urls=("$@")
+  local url=""
+
+  if [[ -f "/root/${filename}" ]]; then
+    info "检测到本地文件 /root/${filename}，优先使用本地安装文件。"
+    cp -f "/root/${filename}" "$output_path"
+    return 0
+  fi
+
+  if [[ -f "./${filename}" ]]; then
+    info "检测到当前目录文件 ${filename}，优先使用本地安装文件。"
+    cp -f "./${filename}" "$output_path"
+    return 0
+  fi
+
+  warn "未找到本地文件 ${filename}，尝试联网下载。"
+  for url in "${urls[@]}"; do
+    [[ -n "$url" ]] || continue
+    info "尝试下载：${url}"
+    if curl -fL --retry 3 --connect-timeout 20 --max-time 600 -o "$output_path" "$url"; then
+      success "下载完成：${filename}"
+      return 0
+    fi
+    warn "该线路下载失败，尝试下一条线路。"
+  done
+
+  die "下载失败：${filename}。可手动上传到 /root/ 或脚本当前目录后重试。"
 }
 
 cat <<EOF
@@ -59,18 +93,36 @@ NGINX_CONF="/etc/nginx/sites-available/default"
 load_panel_state
 
 if [[ "$PANEL_TYPE" == "headplane" ]]; then
-  read -r -p "请输入要更新到的 Headplane 版本 [默认: 0.6.2]: " HEADPLANE_VERSION
-  HEADPLANE_VERSION="${HEADPLANE_VERSION:-0.6.2}"
+  read -r -p "请输入要更新到的 Headplane 版本 [默认: 0.6.3]: " HEADPLANE_VERSION
+  HEADPLANE_VERSION="${HEADPLANE_VERSION:-0.6.3}"
 
   info "准备更新 Headplane 到 v${HEADPLANE_VERSION} ..."
   [[ -d "$HEADPLANE_DIR" ]] || die "未检测到 ${HEADPLANE_DIR}，当前看起来不像已安装 Headplane。"
 
-  pushd "$HEADPLANE_DIR" >/dev/null
-  git fetch --tags origin
-  git checkout "v${HEADPLANE_VERSION}"
+  mkdir -p "$WORKDIR"
+  source_name="headplane-v${HEADPLANE_VERSION}.tar.gz"
+  source_path="${WORKDIR}/${source_name}"
+  source_url="https://github.com/tale/headplane/archive/refs/tags/v${HEADPLANE_VERSION}.tar.gz"
+  backup_dir="${HEADPLANE_DIR}.bak.$(date +%s)"
+  staging_dir="${WORKDIR}/headplane-v${HEADPLANE_VERSION}"
+
+  find_or_download_file "$source_name" "$source_path" \
+    "https://gh-proxy.com/${source_url}" \
+    "$source_url"
+
+  rm -rf "$staging_dir"
+  mkdir -p "$staging_dir"
+  tar -xzf "$source_path" -C "$staging_dir" --strip-components=1
+
+  pushd "$staging_dir" >/dev/null
+  pnpm config set registry https://registry.npmmirror.com
   pnpm install --frozen-lockfile
   pnpm build
   popd >/dev/null
+
+  mv "$HEADPLANE_DIR" "$backup_dir"
+  mv "$staging_dir" "$HEADPLANE_DIR"
+  rm -rf "$backup_dir"
 
   if [[ -f "$HEADPLANE_SERVICE" ]]; then
     systemctl daemon-reload
@@ -79,19 +131,16 @@ if [[ "$PANEL_TYPE" == "headplane" ]]; then
 
   success "Headplane 更新完成。"
 else
-  read -r -p "请输入 Headscale Web UI 压缩包文件名 [默认: headscale-ui.zip]: " UI_ZIP
-  UI_ZIP="${UI_ZIP:-headscale-ui.zip}"
+  UI_ZIP="headscale-ui.zip"
+  UI_URL="https://github.com/gurucomputing/headscale-ui/releases/download/${HEADSCALE_UI_VERSION}/${UI_ZIP}"
 
-  if [[ -f "/root/${UI_ZIP}" ]]; then
-    info "检测到 /root/${UI_ZIP}，准备更新 Headscale Web UI。"
-    mkdir -p "$WORKDIR"
-    cp -f "/root/${UI_ZIP}" "$WORKDIR/${UI_ZIP}"
-    rm -rf "$HEADSCALE_UI_DIR"
-    unzip -o "$WORKDIR/${UI_ZIP}" -d /var/www >/dev/null
-    success "Headscale Web UI 更新完成。"
-  else
-    warn "未检测到 /root/${UI_ZIP}，跳过 Headscale Web UI 更新。"
-  fi
+  mkdir -p "$WORKDIR"
+  find_or_download_file "$UI_ZIP" "$WORKDIR/${UI_ZIP}" \
+    "https://gh-proxy.com/${UI_URL}" \
+    "$UI_URL"
+  rm -rf "$HEADSCALE_UI_DIR"
+  unzip -o "$WORKDIR/${UI_ZIP}" -d /var/www >/dev/null
+  success "Headscale Web UI 更新完成。"
 fi
 
 if [[ -f "$NGINX_CONF" ]]; then

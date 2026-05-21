@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-SCRIPT_VERSION="1.4.0"
+SCRIPT_VERSION="1.5.6"
 WORKDIR="/usr/local/src/headscale-one-click"
 DERP_DIR="/etc/derp"
 DERP_SERVICE="/etc/systemd/system/derp.service"
@@ -10,6 +10,8 @@ NGINX_AVAILABLE="/etc/nginx/sites-available/${NGINX_SITE_NAME}.conf"
 NGINX_ENABLED="/etc/nginx/sites-enabled/${NGINX_SITE_NAME}.conf"
 HEADSCALE_CONFIG="/etc/headscale/config.yaml"
 HEADSCALE_UI_DIR="/var/www/web"
+HEADSCALE_INTERNAL_PORT="18080"
+HEADSCALE_UI_VERSION="2026.03.17"
 DERP_JSON="/var/www/derp.json"
 PANEL_STATE_DIR="/etc/headscale-one-click"
 PANEL_STATE_FILE="${PANEL_STATE_DIR}/panel.env"
@@ -71,7 +73,8 @@ prompt_panel_type() {
   echo
   echo "请选择要安装的面板："
   echo "1) headache-ui / headscale-ui（默认，保持当前脚本行为）"
-  echo "2) Headplane（原生部署，访问路径 /admin）"
+  echo "2) Headplane（实验性，原生部署，访问路径 /admin）"
+  echo "   提示：当前仅建议测试用途，若需稳定可用请优先选择 1"
   read -r -p "请输入选项 [默认: 1]: " choice || true
   choice="${choice:-1}"
 
@@ -199,8 +202,10 @@ EOF
 
 find_or_download_file() {
   local filename="$1"
-  local url="$2"
-  local output_path="$3"
+  local output_path="$2"
+  shift 2
+  local urls=("$@")
+  local url=""
 
   if [[ -f "/root/${filename}" ]]; then
     info "检测到本地文件 /root/${filename}，优先使用本地安装文件。"
@@ -215,34 +220,44 @@ find_or_download_file() {
   fi
 
   warn "未找到本地文件 ${filename}，尝试联网下载。"
-  if ! curl -fL --retry 3 --connect-timeout 20 -o "$output_path" "$url"; then
-    cat <<EOF
+  for url in "${urls[@]}"; do
+    [[ -n "$url" ]] || continue
+    info "尝试下载：${url}"
+    if curl -fL --retry 3 --connect-timeout 20 --max-time 600 -o "$output_path" "$url"; then
+      success "下载完成：${filename}"
+      return 0
+    fi
+    warn "该线路下载失败，尝试下一条线路。"
+  done
+
+  cat <<EOF
 ${RED}[ERROR]${NC} 下载失败：${filename}
 可能原因：
 1. 当前服务器无法稳定访问国外源
-2. GitHub / go.dev / tailscale.com 在当前网络下超时
+2. GitHub / go.dev / tailscale.com 或加速线路在当前网络下超时
 3. 目标版本文件名已变化
 
 中国大陆服务器环境建议处理方式：
-- 先在本地电脑下载好对应文件
+- 可以先在本地电脑下载好对应文件
 - 上传到 /root/ 或脚本当前目录
 - 然后重新执行脚本
 
-当前尝试下载地址：
-${url}
+已尝试下载地址：
+$(printf '%s\n' "${urls[@]}")
 EOF
-    return 1
-  fi
+  return 1
 }
 
 install_go() {
   local go_version="$1"
   local go_file="go${go_version}.linux-${GO_ARCH}.tar.gz"
-  local go_url="https://go.dev/dl/${go_file}"
   local go_tar="${WORKDIR}/${go_file}"
 
   info "安装 Go ${go_version}..."
-  find_or_download_file "$go_file" "$go_url" "$go_tar"
+  find_or_download_file "$go_file" "$go_tar" \
+    "https://golang.google.cn/dl/${go_file}" \
+    "https://go.dev/dl/${go_file}" \
+    "https://dl.google.com/go/${go_file}"
   rm -rf /usr/local/go
   tar -C /usr/local -xzf "$go_tar"
 
@@ -334,7 +349,9 @@ install_headscale() {
   local deb_file="${WORKDIR}/${deb_name}"
 
   info "安装 Headscale ${headscale_version}..."
-  find_or_download_file "$deb_name" "$deb_url" "$deb_file"
+  find_or_download_file "$deb_name" "$deb_file" \
+    "https://gh-proxy.com/${deb_url}" \
+    "$deb_url"
   mv -f "$deb_file" "${WORKDIR}/headscale.deb"
   dpkg -i "${WORKDIR}/headscale.deb" || apt-get install -f -y
 
@@ -346,14 +363,12 @@ install_headscale() {
 install_headscale_ui() {
   local ui_zip_name="headscale-ui.zip"
   local ui_zip_path="${WORKDIR}/${ui_zip_name}"
+  local ui_url="https://github.com/gurucomputing/headscale-ui/releases/download/${HEADSCALE_UI_VERSION}/${ui_zip_name}"
 
-  [[ -f "/root/${ui_zip_name}" ]] || [[ -f "./${ui_zip_name}" ]] || die "未找到 ${ui_zip_name}。中国大陆服务器环境建议先把 Headscale Web UI 压缩包上传到 /root/ 或当前目录。"
-
-  if [[ -f "/root/${ui_zip_name}" ]]; then
-    cp -f "/root/${ui_zip_name}" "$ui_zip_path"
-  else
-    cp -f "./${ui_zip_name}" "$ui_zip_path"
-  fi
+  info "获取 Headscale Web UI ${HEADSCALE_UI_VERSION}..."
+  find_or_download_file "$ui_zip_name" "$ui_zip_path" \
+    "https://gh-proxy.com/${ui_url}" \
+    "$ui_url"
 
   info "部署 Headscale Web UI..."
   mkdir -p /var/www
@@ -394,10 +409,12 @@ install_headplane_runtime() {
       info "检测到兼容的 pnpm ${pnpm_version}，跳过安装 pnpm。"
     else
       info "检测到 pnpm ${pnpm_version}，但版本过低，升级到 10.4.0 ..."
+      npm config set registry https://registry.npmmirror.com
       npm install -g pnpm@10.4.0
     fi
   else
     info "安装 pnpm 10.4.0 ..."
+    npm config set registry https://registry.npmmirror.com
     npm install -g pnpm@10.4.0
   fi
 
@@ -407,16 +424,23 @@ install_headplane_runtime() {
 
 install_headplane() {
   local headplane_version="$1"
-  local repo_url="https://github.com/tale/headplane.git"
+  local source_name="headplane-v${headplane_version}.tar.gz"
+  local source_path="${WORKDIR}/${source_name}"
+  local source_url="https://github.com/tale/headplane/archive/refs/tags/v${headplane_version}.tar.gz"
   local cookie_secret=""
 
   info "开始安装 Headplane ${headplane_version}（原生模式）..."
   install_headplane_runtime
 
   rm -rf "$HEADPLANE_DIR"
-  git clone --depth 1 --branch "v${headplane_version}" "$repo_url" "$HEADPLANE_DIR"
+  find_or_download_file "$source_name" "$source_path" \
+    "https://gh-proxy.com/${source_url}" \
+    "$source_url"
+  mkdir -p "$HEADPLANE_DIR"
+  tar -xzf "$source_path" -C "$HEADPLANE_DIR" --strip-components=1
 
   pushd "$HEADPLANE_DIR" >/dev/null
+  pnpm config set registry https://registry.npmmirror.com
   pnpm install --frozen-lockfile
   pnpm build
   popd >/dev/null
@@ -435,7 +459,7 @@ server:
   data_path: "${HEADPLANE_DATA_DIR}"
 
 headscale:
-  url: "http://127.0.0.1:8080"
+  url: "http://127.0.0.1:${HEADSCALE_INTERNAL_PORT}"
   public_url: "http://${SERVER_IP}:${HEADSCALE_PORT}"
   config_path: "${HEADSCALE_CONFIG}"
   config_strict: false
@@ -510,7 +534,7 @@ EOF
  proxy_set_header X-Forwarded-Proto \$scheme;
  }
  location / {
- proxy_pass http://127.0.0.1:8080;
+ proxy_pass http://127.0.0.1:${HEADSCALE_INTERNAL_PORT};
  proxy_http_version 1.1;
  proxy_set_header Upgrade \$http_upgrade;
  proxy_set_header Connection \$connection_upgrade;
@@ -541,7 +565,7 @@ EOF
   else
     cat >> "$NGINX_AVAILABLE" <<EOF
  location / {
- proxy_pass http://127.0.0.1:8080;
+ proxy_pass http://127.0.0.1:${HEADSCALE_INTERNAL_PORT};
  proxy_http_version 1.1;
  proxy_set_header Upgrade \$http_upgrade;
  proxy_set_header Connection \$connection_upgrade;
@@ -586,18 +610,22 @@ configure_headscale() {
   info "修改 Headscale 配置..."
   [[ -f "$HEADSCALE_CONFIG" ]] || die "未找到 ${HEADSCALE_CONFIG}，无法继续修改 Headscale 配置。"
 
+  mkdir -p /var/www
   cp -f "$HEADSCALE_CONFIG" "${HEADSCALE_CONFIG}.bak.$(date +%s)"
 
   grep -q '^server_url:' "$HEADSCALE_CONFIG" || die "Headscale 配置中未找到 server_url 字段，当前版本配置模板可能已变化。"
+  grep -q '^listen_addr:' "$HEADSCALE_CONFIG" || die "Headscale 配置中未找到 listen_addr 字段，当前版本配置模板可能已变化。"
   grep -q 'v4: 100.64.0.0/10' "$HEADSCALE_CONFIG" || warn "未找到默认 v4 网段，稍后请手动确认 prefixes.v4 是否已正确修改。"
   grep -q 'https://controlplane.tailscale.com/derpmap/default' "$HEADSCALE_CONFIG" || warn "未找到默认 derpmap 配置项，稍后请手动确认 DERP 地址是否已正确写入。"
 
   sed -i "s|^server_url:.*|server_url: http://${SERVER_IP}:${HEADSCALE_PORT}|" "$HEADSCALE_CONFIG"
+  sed -i "s|^listen_addr:.*|listen_addr: 127.0.0.1:${HEADSCALE_INTERNAL_PORT}|" "$HEADSCALE_CONFIG"
   sed -i "s|^\([[:space:]]*\)v4: 100.64.0.0/10|\1v4: ${IP_PREFIX}/24|" "$HEADSCALE_CONFIG"
   sed -i "s|^\([[:space:]]*\)v6: fd7a:115c:a1e0::/48|#\1v6: fd7a:115c:a1e0::/48|" "$HEADSCALE_CONFIG"
   sed -i "s|^\([[:space:]]*\)- https://controlplane.tailscale.com/derpmap/default|#\1- https://controlplane.tailscale.com/derpmap/default\n\1- http://127.0.0.1/d/derp.json|" "$HEADSCALE_CONFIG"
 
   grep -q "^server_url: http://${SERVER_IP}:${HEADSCALE_PORT}" "$HEADSCALE_CONFIG" || die "server_url 修改失败，请检查 Headscale 配置文件格式是否变化。"
+  grep -q "^listen_addr: 127.0.0.1:${HEADSCALE_INTERNAL_PORT}" "$HEADSCALE_CONFIG" || die "listen_addr 修改失败，请检查 Headscale 配置文件格式是否变化。"
 
   cat > "$DERP_JSON" <<EOF
 {
@@ -695,16 +723,17 @@ main() {
   prompt_value IP_PREFIX "请输入IP前缀（例如：100.64.0.0）" "100.64.0.0"
   prompt_value DERP_PORT "请输入Derp服务端口" "12345"
   prompt_value HTTP_PORT "请输入HTTP端口" "3340"
-  prompt_value GO_VERSION "请输入 Go 版本（不要带 go 前缀，例如 1.26.1）" "1.26.1"
+  prompt_value GO_VERSION "请输入 Go 版本（不要带 go 前缀，例如 1.26.3）" "1.26.3"
   prompt_value HEADSCALE_VERSION "请输入 Headscale 版本" "0.28.0"
   prompt_panel_type
   if [[ "$PANEL_TYPE" == "headplane" ]]; then
-    prompt_value HEADPLANE_VERSION "请输入 Headplane 版本" "0.6.2"
+    prompt_value HEADPLANE_VERSION "请输入 Headplane 版本" "0.6.3"
   fi
 
   validate_ipv4 "$SERVER_IP" || die "服务器IP格式不正确。"
   validate_ipv4 "$IP_PREFIX" || die "IP前缀格式不正确，应类似 100.64.0.0"
   validate_port "$HEADSCALE_PORT" || die "Headscale端口无效。"
+  [[ "$HEADSCALE_PORT" != "$HEADSCALE_INTERNAL_PORT" ]] || die "Headscale 外部访问端口不能使用内部保留端口 ${HEADSCALE_INTERNAL_PORT}。"
   validate_port "$DERP_PORT" || die "Derp端口无效。"
   validate_port "$HTTP_PORT" || die "HTTP端口无效。"
 
@@ -714,13 +743,13 @@ main() {
   install_derp
   install_tailscale
   install_headscale "$HEADSCALE_VERSION"
+  configure_headscale
   if [[ "$PANEL_TYPE" == "headplane" ]]; then
     install_headplane "$HEADPLANE_VERSION"
   else
     install_headscale_ui
   fi
   configure_nginx
-  configure_headscale
   if [[ "$PANEL_TYPE" == "headplane" ]]; then
     systemctl restart headplane
   fi
