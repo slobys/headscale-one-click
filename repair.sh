@@ -26,12 +26,13 @@ HEADPLANE_DATA_DIR="/var/lib/headplane"
 NGINX_SITE_CONFIG="/etc/nginx/sites-available/headscale-one-click.conf"
 
 load_panel_state() {
-  PANEL_TYPE="headache-ui"
+  PANEL_TYPE="headscale-ui"
 
   if [[ -f "$PANEL_STATE_FILE" ]]; then
     # shellcheck disable=SC1090
     source "$PANEL_STATE_FILE"
   fi
+  [[ "$PANEL_TYPE" == "headache-ui" ]] && PANEL_TYPE="headscale-ui"
 }
 
 load_panel_state

@@ -26,13 +26,14 @@ HEADPLANE_FALLBACK_VERSION="0.6.3"
 HEADSCALE_UI_FALLBACK_VERSION="2026.03.17"
 
 load_panel_state() {
-  PANEL_TYPE="headache-ui"
+  PANEL_TYPE="headscale-ui"
   PANEL_PATH="/web"
 
   if [[ -f "$PANEL_STATE_FILE" ]]; then
     # shellcheck disable=SC1090
     source "$PANEL_STATE_FILE"
   fi
+  [[ "$PANEL_TYPE" == "headache-ui" ]] && PANEL_TYPE="headscale-ui"
 }
 
 find_or_download_file() {

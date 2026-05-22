@@ -26,12 +26,13 @@ HEADPLANE_DATA_DIR="/var/lib/headplane"
 HEADPLANE_SERVICE="/etc/systemd/system/headplane.service"
 
 load_panel_state() {
-  PANEL_TYPE="headache-ui"
+  PANEL_TYPE="headscale-ui"
 
   if [[ -f "$PANEL_STATE_FILE" ]]; then
     # shellcheck disable=SC1090
     source "$PANEL_STATE_FILE"
   fi
+  [[ "$PANEL_TYPE" == "headache-ui" ]] && PANEL_TYPE="headscale-ui"
 }
 
 load_panel_state

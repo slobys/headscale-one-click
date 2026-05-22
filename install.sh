@@ -122,14 +122,14 @@ prompt_panel_type() {
 
   echo
   echo "请选择要安装的面板："
-  echo "1) headache-ui / headscale-ui（默认，保持当前脚本行为）"
+  echo "1) Headscale-ui（默认，访问路径 /web）"
   echo "2) Headplane（原生部署，访问路径 /admin）"
   read -r -p "请输入选项 [默认: 1]: " choice || true
   choice="${choice:-1}"
 
   case "$choice" in
     1)
-      PANEL_TYPE="headache-ui"
+      PANEL_TYPE="headscale-ui"
       PANEL_PATH="/web"
       ;;
     2)

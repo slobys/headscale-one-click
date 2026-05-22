@@ -141,7 +141,7 @@ tailscale up --login-server=http://1.2.3.4:8080 --accept-routes=true --accept-dn
 /etc/headscale/config.yaml                 Headscale 配置
 /etc/systemd/system/derp.service           DERP 服务
 /var/www/derp.json                         DERP 配置 JSON
-/var/www/web                               headache-ui 目录
+/var/www/web                               Headscale-ui 目录
 /opt/headplane                             Headplane 目录
 /etc/nginx/sites-available/headscale-one-click.conf  Nginx 站点配置
 ```

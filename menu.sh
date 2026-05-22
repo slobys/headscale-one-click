@@ -39,13 +39,14 @@ show_status() {
 }
 
 show_access_info() {
-  local panel_type="headache-ui"
+  local panel_type="headscale-ui"
   local panel_path="/web"
 
   if [[ -f "$PANEL_STATE_FILE" ]]; then
     # shellcheck disable=SC1090
     source "$PANEL_STATE_FILE"
   fi
+  [[ "${PANEL_TYPE:-}" == "headache-ui" ]] && PANEL_TYPE="headscale-ui"
 
   echo
   info "常用信息"
@@ -54,7 +55,7 @@ show_access_info() {
   echo "- DERP JSON: /var/www/derp.json"
   echo "- 当前面板类型: ${PANEL_TYPE:-$panel_type}"
   echo "- 当前面板路径: ${PANEL_PATH:-$panel_path}"
-  echo "- headache-ui 目录: /var/www/web"
+  echo "- Headscale-ui 目录: /var/www/web"
   echo "- Headplane 目录: /opt/headplane"
   echo "- Headplane 配置: /etc/headplane/config.yaml"
   echo "- Nginx 站点配置: /etc/nginx/sites-available/headscale-one-click.conf"
