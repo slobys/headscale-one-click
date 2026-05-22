@@ -14,6 +14,9 @@
 - API Key 自动生成增加重试，降低 Headscale 刚重启未就绪时的失败概率
 - Nginx 反代 Host 头改用 `$http_host`，避免 Headplane 在非标准端口下登录时报 `Unexpected Server Error`
 - 移除 Headplane 安装选项中的实验性 / 测试用途提示
+- 菜单更新流程改为识别当前独立 Nginx 站点配置 `headscale-one-click.conf`，并保留旧 `default` 配置兜底
+- 检查上游版本增加网络超时，避免 GitHub/Go 源访问慢时菜单长时间卡住
+- 菜单清屏失败时不再中断，提升非标准终端兼容性
 
 ## v1.5.6 - 2026-05-21
 

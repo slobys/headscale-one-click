@@ -76,7 +76,7 @@ restart_services() {
 }
 
 show_menu() {
-  clear
+  clear 2>/dev/null || true
   echo "=========================================="
   echo "  Headscale One Click 管理菜单"
   echo "=========================================="

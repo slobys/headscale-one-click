@@ -19,20 +19,24 @@ require_cmd() {
   }
 }
 
+curl_quick() {
+  curl -fsSL --connect-timeout 15 --max-time 45 "$@"
+}
+
 fetch_latest_go() {
-  curl -fsSL https://go.dev/VERSION?m=text | head -n 1 | sed 's/^go//'
+  curl_quick https://golang.google.cn/VERSION?m=text | head -n 1 | sed 's/^go//'
 }
 
 fetch_latest_headscale() {
-  curl -fsSL https://api.github.com/repos/juanfont/headscale/releases/latest | grep '"tag_name"' | head -n 1 | sed -E 's/.*"v?([^"]+)".*/\1/'
+  curl_quick https://api.github.com/repos/juanfont/headscale/releases/latest | grep '"tag_name"' | head -n 1 | sed -E 's/.*"v?([^"]+)".*/\1/'
 }
 
 fetch_latest_headscale_ui() {
-  curl -fsSL https://api.github.com/repos/gurucomputing/headscale-ui/releases/latest | grep '"tag_name"' | head -n 1 | sed -E 's/.*"v?([^"]+)".*/\1/'
+  curl_quick https://api.github.com/repos/gurucomputing/headscale-ui/releases/latest | grep '"tag_name"' | head -n 1 | sed -E 's/.*"v?([^"]+)".*/\1/'
 }
 
 fetch_latest_headplane() {
-  curl -fsSL https://api.github.com/repos/tale/headplane/releases/latest | grep '"tag_name"' | head -n 1 | sed -E 's/.*"v?([^"]+)".*/\1/'
+  curl_quick https://api.github.com/repos/tale/headplane/releases/latest | grep '"tag_name"' | head -n 1 | sed -E 's/.*"v?([^"]+)".*/\1/'
 }
 
 main() {

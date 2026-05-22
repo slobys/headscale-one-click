@@ -88,7 +88,8 @@ answer="${answer:-N}"
 
 WORKDIR="/usr/local/src/headscale-one-click"
 HEADSCALE_UI_DIR="/var/www/web"
-NGINX_CONF="/etc/nginx/sites-available/default"
+NGINX_CONF="/etc/nginx/sites-available/headscale-one-click.conf"
+NGINX_FALLBACK_CONF="/etc/nginx/sites-available/default"
 
 load_panel_state
 
@@ -143,7 +144,7 @@ else
   success "Headscale Web UI 更新完成。"
 fi
 
-if [[ -f "$NGINX_CONF" ]]; then
+if [[ -f "$NGINX_CONF" || -f "$NGINX_FALLBACK_CONF" ]]; then
   info "检测到 Nginx 配置，执行语法检查并重启。"
   nginx -t
   systemctl restart nginx
