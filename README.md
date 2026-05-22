@@ -29,7 +29,27 @@ https://github.com/slobys/headscale-one-click
 
 ## 快速开始
 
-如果你只想先跑起来，直接用下面这组命令即可：
+如果你只想先跑起来，直接用一条命令即可：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/slobys/headscale-one-click/main/bootstrap.sh)
+```
+
+这条命令会自动拉取 / 更新项目到 `/root/headscale-one-click`，补齐脚本执行权限，安装快捷命令 `hs`，然后启动交互式安装。
+
+安装完成后，可以随时使用菜单：
+
+```bash
+hs
+```
+
+如果你想直接进入菜单而不是安装：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/slobys/headscale-one-click/main/bootstrap.sh) --menu
+```
+
+也可以使用传统方式手动拉取后安装：
 
 ```bash
 git clone https://github.com/slobys/headscale-one-click.git
@@ -40,7 +60,19 @@ sudo ./install.sh
 
 如果部署环境位于中国大陆网络，脚本会自动优先尝试国内友好的下载线路；你也可以提前把安装文件传到 `/root/` 或项目目录，脚本会优先使用本地文件。
 
-### 方式一：直接从 GitHub 拉取后安装（推荐）
+### 方式一：一条命令安装（推荐）
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/slobys/headscale-one-click/main/bootstrap.sh)
+```
+
+### 方式二：使用菜单管理脚本
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/slobys/headscale-one-click/main/bootstrap.sh) --menu
+```
+
+### 方式三：直接从 GitHub 拉取后安装
 
 ```bash
 git clone https://github.com/slobys/headscale-one-click.git
@@ -49,7 +81,7 @@ chmod +x install.sh update.sh uninstall.sh repair.sh menu.sh check-updates.sh
 sudo ./install.sh
 ```
 
-### 方式二：使用菜单管理脚本
+### 方式四：手动使用菜单管理脚本
 
 ```bash
 git clone https://github.com/slobys/headscale-one-click.git
@@ -58,7 +90,7 @@ chmod +x install.sh update.sh uninstall.sh repair.sh menu.sh check-updates.sh
 sudo ./menu.sh
 ```
 
-### 方式三：先检查上游是否有新版本
+### 方式五：先检查上游是否有新版本
 
 ```bash
 git clone https://github.com/slobys/headscale-one-click.git

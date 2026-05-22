@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- 新增 `bootstrap.sh` 一条命令入口，自动拉取 / 更新项目、补齐执行权限、安装 `hs` 菜单快捷命令并启动安装
+- `README.md` 快速开始改为优先展示一条命令安装方式，同时保留手动 `git clone` 用法
+
 ## v1.5.6 - 2026-05-21
 
 ### Changed
