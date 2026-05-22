@@ -449,14 +449,13 @@ install_headplane() {
   cookie_secret="$(openssl rand -hex 16)"
 
   cat > "$HEADPLANE_CONFIG" <<EOF
-server:
-  host: "127.0.0.1"
-  port: ${HEADPLANE_PORT}
-  base_url: "http://${SERVER_IP}:${HEADSCALE_PORT}"
-  cookie_secret: "${cookie_secret}"
-  cookie_secure: false
-  cookie_max_age: 86400
-  data_path: "${HEADPLANE_DATA_DIR}"
+host: "127.0.0.1"
+port: ${HEADPLANE_PORT}
+base_url: "http://${SERVER_IP}:${HEADSCALE_PORT}"
+cookie_secret: "${cookie_secret}"
+cookie_secure: false
+cookie_max_age: 86400
+data_path: "${HEADPLANE_DATA_DIR}"
 
 headscale:
   url: "http://127.0.0.1:${HEADSCALE_INTERNAL_PORT}"
@@ -654,6 +653,15 @@ EOF
 
 create_apikey() {
   info "生成 Headscale API Key..."
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    if headscale apikeys create --expiration 9999d; then
+      return 0
+    fi
+    warn "API Key 生成失败，等待 Headscale 就绪后重试（${attempt}/5）..."
+    sleep 3
+  done
+
   if ! headscale apikeys create --expiration 9999d; then
     warn "API Key 自动生成失败，但主体安装已完成。可稍后手动执行：headscale apikeys create --expiration 9999d"
   fi

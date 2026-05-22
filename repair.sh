@@ -22,6 +22,7 @@ die() {
 PANEL_STATE_FILE="/etc/headscale-one-click/panel.env"
 HEADPLANE_DIR="/opt/headplane"
 HEADPLANE_CONFIG="/etc/headplane/config.yaml"
+HEADPLANE_DATA_DIR="/var/lib/headplane"
 
 load_panel_state() {
   PANEL_TYPE="headache-ui"
@@ -33,6 +34,58 @@ load_panel_state() {
 }
 
 load_panel_state
+
+repair_headplane_config() {
+  local server_url=""
+  local listen_addr=""
+  local cookie_secret=""
+
+  [[ -f "$HEADPLANE_CONFIG" ]] || return 0
+  [[ -f /etc/headscale/config.yaml ]] || return 0
+
+  if ! grep -q '^server:' "$HEADPLANE_CONFIG"; then
+    return 0
+  fi
+
+  warn "检测到旧版 Headplane 配置格式，正在转换为 v0.6.x 使用的顶层配置格式..."
+  server_url="$(awk -F': ' '/^server_url:/ {print $2; exit}' /etc/headscale/config.yaml | tr -d '"')"
+  listen_addr="$(awk -F': ' '/^listen_addr:/ {print $2; exit}' /etc/headscale/config.yaml | tr -d '"')"
+  cookie_secret="$(awk -F': ' '/cookie_secret:/ {print $2; exit}' "$HEADPLANE_CONFIG" | tr -d '"')"
+
+  [[ -n "$server_url" ]] || server_url="http://127.0.0.1:8080"
+  [[ -n "$listen_addr" ]] || listen_addr="127.0.0.1:18080"
+  [[ -n "$cookie_secret" ]] || cookie_secret="$(openssl rand -hex 16)"
+
+  cp -f "$HEADPLANE_CONFIG" "${HEADPLANE_CONFIG}.bak.$(date +%s)"
+  mkdir -p "$HEADPLANE_DATA_DIR"
+
+  cat > "$HEADPLANE_CONFIG" <<EOF
+host: "127.0.0.1"
+port: 3000
+base_url: "${server_url}"
+cookie_secret: "${cookie_secret}"
+cookie_secure: false
+cookie_max_age: 86400
+data_path: "${HEADPLANE_DATA_DIR}"
+
+headscale:
+  url: "http://${listen_addr}"
+  public_url: "${server_url}"
+  config_path: "/etc/headscale/config.yaml"
+  config_strict: false
+
+integration:
+  docker:
+    enabled: false
+  kubernetes:
+    enabled: false
+    pod_name: "headscale"
+  proc:
+    enabled: true
+EOF
+
+  success "Headplane 配置已修复。"
+}
 
 info "开始执行基础修复流程..."
 
@@ -65,6 +118,7 @@ if [[ "$PANEL_TYPE" == "headplane" ]]; then
     warn "未找到 ${HEADPLANE_CONFIG}，Headplane 配置可能缺失。"
   else
     info "检测到 Headplane 配置文件。"
+    repair_headplane_config
   fi
 else
   if [[ ! -d /var/www/web ]]; then

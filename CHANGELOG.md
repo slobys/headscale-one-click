@@ -8,6 +8,9 @@
 
 ### Changed
 - 精简 `README.md`，删除重复安装方式、维护者发布建议和项目内部说明，改为面向使用者的安装与使用说明
+- 修复 Headplane v0.6.x 配置生成格式，避免登录时因连接不到 Headscale 出现 `Unexpected Server Error`
+- `repair.sh` 会自动把旧版 `server:` 嵌套配置转换为 Headplane v0.6.x 使用的顶层配置格式
+- API Key 自动生成增加重试，降低 Headscale 刚重启未就绪时的失败概率
 
 ## v1.5.6 - 2026-05-21
 
