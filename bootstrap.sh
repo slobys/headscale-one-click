@@ -2,8 +2,11 @@
 set -Eeuo pipefail
 
 REPO_URL="${REPO_URL:-https://github.com/slobys/headscale-one-click.git}"
+REPO_ARCHIVE_URL="${REPO_ARCHIVE_URL:-https://codeload.github.com/slobys/headscale-one-click/tar.gz/refs/heads/main}"
+REPO_ARCHIVE_MIRROR_URL="${REPO_ARCHIVE_MIRROR_URL:-https://gh-proxy.com/https://codeload.github.com/slobys/headscale-one-click/tar.gz/refs/heads/main}"
 INSTALL_DIR="${INSTALL_DIR:-/root/headscale-one-click}"
 SHORTCUT="${SHORTCUT:-/usr/local/bin/hs}"
+BOOTSTRAP_TIMEOUT="${BOOTSTRAP_TIMEOUT:-60}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -26,28 +29,72 @@ require_root() {
 }
 
 install_git_if_missing() {
-  if command -v git >/dev/null 2>&1; then
+  if command -v git >/dev/null 2>&1 && command -v curl >/dev/null 2>&1 && command -v tar >/dev/null 2>&1; then
     return 0
   fi
 
-  info "检测到 git 未安装，尝试自动安装 git..."
+  info "检测到基础工具不完整，尝试自动安装 git / curl / tar..."
   if command -v apt >/dev/null 2>&1; then
     apt update
-    DEBIAN_FRONTEND=noninteractive apt install -y git ca-certificates curl
+    DEBIAN_FRONTEND=noninteractive apt install -y git ca-certificates curl tar
   else
     die "当前系统缺少 git，请先安装 git 后重试。"
   fi
 }
 
+run_with_timeout() {
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$BOOTSTRAP_TIMEOUT" "$@"
+  else
+    "$@"
+  fi
+}
+
+download_archive() {
+  local tmp_file="/tmp/headscale-one-click-main.tar.gz"
+  local tmp_dir="/tmp/headscale-one-click-bootstrap.$$"
+  local url
+
+  rm -f "$tmp_file"
+  rm -rf "$tmp_dir"
+  mkdir -p "$tmp_dir"
+
+  for url in "$REPO_ARCHIVE_MIRROR_URL" "$REPO_ARCHIVE_URL"; do
+    info "尝试下载项目源码包：${url}"
+    if run_with_timeout curl -fL --connect-timeout 15 --retry 2 --retry-delay 2 "$url" -o "$tmp_file"; then
+      tar -xzf "$tmp_file" -C "$tmp_dir"
+      rm -rf "$INSTALL_DIR"
+      mv "$tmp_dir"/headscale-one-click-* "$INSTALL_DIR"
+      rm -f "$tmp_file"
+      rm -rf "$tmp_dir"
+      success "已通过源码包安装项目：${INSTALL_DIR}"
+      return 0
+    fi
+    warn "源码包下载失败，切换下一条线路。"
+  done
+
+  rm -f "$tmp_file"
+  rm -rf "$tmp_dir"
+  return 1
+}
+
 sync_repo() {
   if [[ -d "${INSTALL_DIR}/.git" ]]; then
     info "检测到已有项目目录，正在更新：${INSTALL_DIR}"
-    git -C "$INSTALL_DIR" pull --ff-only
+    if run_with_timeout git -C "$INSTALL_DIR" pull --ff-only; then
+      return 0
+    fi
+    warn "Git 更新超时或失败，将改用源码包刷新项目。"
+    download_archive || die "项目更新失败，请检查服务器网络后重试。"
   elif [[ -e "$INSTALL_DIR" ]]; then
     die "安装目录已存在但不是 Git 仓库：${INSTALL_DIR}，请先手动处理后重试。"
   else
     info "正在拉取项目到：${INSTALL_DIR}"
-    git clone "$REPO_URL" "$INSTALL_DIR"
+    if run_with_timeout git clone "$REPO_URL" "$INSTALL_DIR"; then
+      return 0
+    fi
+    warn "GitHub 拉取超时或失败，将改用源码包安装。"
+    download_archive || die "项目拉取失败，请稍后重试，或手动下载项目后运行 install.sh。"
   fi
 }
 

@@ -9,7 +9,7 @@
 使用 root 用户执行：
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/slobys/headscale-one-click/main/bootstrap.sh)
+curl -L --connect-timeout 15 https://cdn.jsdelivr.net/gh/slobys/headscale-one-click@main/bootstrap.sh -o /tmp/hs-bootstrap.sh && bash /tmp/hs-bootstrap.sh
 ```
 
 这条命令会自动：
@@ -28,7 +28,7 @@ hs
 如果只想打开菜单，不直接安装：
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/slobys/headscale-one-click/main/bootstrap.sh) --menu
+curl -L --connect-timeout 15 https://cdn.jsdelivr.net/gh/slobys/headscale-one-click@main/bootstrap.sh -o /tmp/hs-bootstrap.sh && bash /tmp/hs-bootstrap.sh --menu
 ```
 
 ## 适用环境
@@ -108,6 +108,8 @@ http://1.2.3.4:8080/web
 
 脚本会自动尝试更适合中国大陆网络的下载线路：
 
+- 安装入口优先使用 jsDelivr，避免 GitHub Raw 静默卡住
+- 项目拉取会先尝试 Git，超时后自动改用源码包下载
 - Go 优先尝试 `golang.google.cn`
 - GitHub Release 文件优先尝试加速线路，再回退到官方地址
 - Go 依赖使用 `https://goproxy.cn,direct`
