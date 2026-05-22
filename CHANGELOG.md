@@ -13,6 +13,7 @@
 - Headplane systemd 服务改为使用官方默认配置路径，不再额外设置 `HEADPLANE_CONFIG_PATH`
 - API Key 自动生成增加重试，降低 Headscale 刚重启未就绪时的失败概率
 - Nginx 反代 Host 头改用 `$http_host`，避免 Headplane 在非标准端口下登录时报 `Unexpected Server Error`
+- 移除 Headplane 安装选项中的实验性 / 测试用途提示
 
 ## v1.5.6 - 2026-05-21
 

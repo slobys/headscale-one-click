@@ -73,8 +73,7 @@ prompt_panel_type() {
   echo
   echo "请选择要安装的面板："
   echo "1) headache-ui / headscale-ui（默认，保持当前脚本行为）"
-  echo "2) Headplane（实验性，原生部署，访问路径 /admin）"
-  echo "   提示：当前仅建议测试用途，若需稳定可用请优先选择 1"
+  echo "2) Headplane（原生部署，访问路径 /admin）"
   read -r -p "请输入选项 [默认: 1]: " choice || true
   choice="${choice:-1}"
 

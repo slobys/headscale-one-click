@@ -100,7 +100,7 @@ http://1.2.3.4:8080/web
 安装时可以选择：
 
 - `headache-ui`：默认选项，访问路径 `/web`，更适合作为稳定方案
-- `Headplane`：访问路径 `/admin`，当前更适合测试
+- `Headplane`：访问路径 `/admin`，原生部署
 
 如果不确定，直接选择默认的 `headache-ui`。
 
