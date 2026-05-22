@@ -23,6 +23,7 @@ PANEL_STATE_FILE="/etc/headscale-one-click/panel.env"
 HEADPLANE_DIR="/opt/headplane"
 HEADPLANE_CONFIG="/etc/headplane/config.yaml"
 HEADPLANE_DATA_DIR="/var/lib/headplane"
+NGINX_SITE_CONFIG="/etc/nginx/sites-available/headscale-one-click.conf"
 
 load_panel_state() {
   PANEL_TYPE="headache-ui"
@@ -88,6 +89,25 @@ EOF
   success "Headplane 配置已修复。"
 }
 
+repair_nginx_host_header() {
+  local config_file=""
+  local changed=0
+
+  for config_file in "$NGINX_SITE_CONFIG" /etc/nginx/sites-available/default; do
+    [[ -f "$config_file" ]] || continue
+    if grep -q 'proxy_set_header Host \$host;' "$config_file"; then
+      warn "检测到 Nginx Host 头未保留端口，正在改为 \$http_host..."
+      cp -f "$config_file" "${config_file}.bak.$(date +%s)"
+      sed -i 's/proxy_set_header Host \$host;/proxy_set_header Host \$http_host;/g' "$config_file"
+      changed=1
+    fi
+  done
+
+  if [[ "$changed" -eq 1 ]]; then
+    success "Nginx Host 头已修复。"
+  fi
+}
+
 info "开始执行基础修复流程..."
 
 if ! command -v nginx >/dev/null 2>&1; then
@@ -136,6 +156,7 @@ else
 fi
 
 if [[ -f /etc/nginx/sites-available/headscale-one-click.conf ]]; then
+  repair_nginx_host_header
   info "检测到独立 Nginx 站点配置，执行语法检查..."
   if nginx -t; then
     success "Nginx 配置检查通过。"
@@ -143,6 +164,7 @@ if [[ -f /etc/nginx/sites-available/headscale-one-click.conf ]]; then
     warn "Nginx 配置检查失败，请手动检查 /etc/nginx/sites-available/headscale-one-click.conf"
   fi
 elif [[ -f /etc/nginx/sites-available/default ]]; then
+  repair_nginx_host_header
   info "执行 Nginx 配置检查..."
   if nginx -t; then
     success "Nginx 配置检查通过。"
