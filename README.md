@@ -161,66 +161,6 @@ tailscale up --login-server=http://1.2.3.4:8080 --accept-routes=true
 tailscale up --login-server=http://1.2.3.4:8080 --accept-routes=true --accept-dns=false --advertise-routes=192.168.2.0/24 --reset
 ```
 
-## 常用管理
-
-打开菜单：
-
-```bash
-hs
-```
-
-菜单里可以执行：
-
-- 安装 / 重新安装
-- 更新
-- 卸载
-- 查看服务状态
-- 重启服务
-- 查看常用路径
-- 修复
-- 检查上游新版本
-
-也可以进入项目目录手动执行：
-
-```bash
-cd /root/headscale-one-click
-sudo ./update.sh
-sudo ./repair.sh
-sudo ./check-updates.sh
-sudo ./uninstall.sh
-```
-
-## DERP 客户端校验
-
-安装完成后，脚本会询问是否启用 DERP 客户端校验。
-
-启用后会给 `derp.service` 增加：
-
-```bash
---verify-clients
-```
-
-它可以减少公网其他客户端滥用你的 DERP 中继，但建议先确认 Headscale、DERP 和客户端接入都正常，再开启这个选项。
-
-如需手动开启，编辑：
-
-```bash
-/etc/systemd/system/derp.service
-```
-
-在 `ExecStart` 最后追加：
-
-```bash
---verify-clients
-```
-
-然后重启服务：
-
-```bash
-systemctl daemon-reload
-systemctl restart derp
-```
-
 ## 常用路径
 
 ```text
