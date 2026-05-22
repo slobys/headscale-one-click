@@ -12,6 +12,7 @@ HEADSCALE_CONFIG="/etc/headscale/config.yaml"
 HEADSCALE_UI_DIR="/var/www/web"
 HEADSCALE_INTERNAL_PORT="18080"
 GO_FALLBACK_VERSION="1.26.3"
+TAILSCALE_FALLBACK_VERSION="1.98.3"
 HEADSCALE_FALLBACK_VERSION="0.28.0"
 HEADSCALE_UI_FALLBACK_VERSION="2026.03.17"
 HEADPLANE_FALLBACK_VERSION="0.6.3"
@@ -26,11 +27,11 @@ HEADPLANE_SERVICE="/etc/systemd/system/headplane.service"
 HEADPLANE_DATA_DIR="/var/lib/headplane"
 HEADPLANE_PORT="3000"
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+RED=$'\033[0;31m'
+GREEN=$'\033[0;32m'
+YELLOW=$'\033[1;33m'
+BLUE=$'\033[0;34m'
+NC=$'\033[0m'
 
 info() { echo -e "${BLUE}[INFO]${NC} $*"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
@@ -101,6 +102,10 @@ fetch_latest_headscale() {
   curl_quick https://api.github.com/repos/juanfont/headscale/releases/latest | grep '"tag_name"' | head -n 1 | sed -E 's/.*"v?([^"]+)".*/\1/'
 }
 
+fetch_latest_tailscale() {
+  curl_quick https://api.github.com/repos/tailscale/tailscale/releases/latest | grep '"tag_name"' | head -n 1 | sed -E 's/.*"v?([^"]+)".*/\1/'
+}
+
 fetch_latest_headscale_ui() {
   curl_quick https://api.github.com/repos/gurucomputing/headscale-ui/releases/latest | grep '"tag_name"' | head -n 1 | sed -E 's/.*"v?([^"]+)".*/\1/'
 }
@@ -110,8 +115,9 @@ fetch_latest_headplane() {
 }
 
 detect_latest_versions() {
-  info "查询 Go / Headscale / Headscale-ui / Headplane 最新版本..."
+  info "查询 Go / Tailscale DERP / Headscale / Headscale-ui / Headplane 最新版本..."
   GO_LATEST_VERSION="$(fetch_latest_go 2>/dev/null || echo unknown)"
+  TAILSCALE_LATEST_VERSION="$(fetch_latest_tailscale 2>/dev/null || echo unknown)"
   HEADSCALE_LATEST_VERSION="$(fetch_latest_headscale 2>/dev/null || echo unknown)"
   HEADSCALE_UI_LATEST_VERSION="$(fetch_latest_headscale_ui 2>/dev/null || echo unknown)"
   HEADPLANE_LATEST_VERSION="$(fetch_latest_headplane 2>/dev/null || echo unknown)"
@@ -342,17 +348,25 @@ install_go() {
 }
 
 install_derp() {
-  info "开始安装 DERP 服务..."
+  local tailscale_version="$1"
+  local gopath=""
+  local cert_go_path=""
+  local tailscale_module_dir=""
+
+  info "开始安装 DERP 服务（Tailscale ${tailscale_version}）..."
   export PATH="$PATH:/usr/local/go/bin"
 
-  go install tailscale.com/cmd/derper@main
+  go install "tailscale.com/cmd/derper@v${tailscale_version}"
 
-  local gopath
   gopath="$(go env GOPATH)"
-  local cert_go_path
-  cert_go_path="$(find "${gopath}/pkg/mod" -type f -path '*tailscale.com*/cmd/derper/cert.go' | head -n 1)"
+  tailscale_module_dir="${gopath}/pkg/mod/tailscale.com@v${tailscale_version}"
+  cert_go_path="${tailscale_module_dir}/cmd/derper/cert.go"
 
-  [[ -n "$cert_go_path" ]] || die "未找到 cert.go，无法继续处理 derper 源码。"
+  if [[ ! -f "$cert_go_path" ]]; then
+    cert_go_path="$(find "$tailscale_module_dir" -type f -path '*/cmd/derper/cert.go' 2>/dev/null | head -n 1)"
+  fi
+
+  [[ -f "$cert_go_path" ]] || die "未找到 cert.go，无法继续处理 derper 源码。"
 
   info "检测到 derper cert.go: ${cert_go_path}"
   grep -q 'if hi.ServerName != m.hostname' "$cert_go_path" || die "cert.go 中未找到预期代码段，可能是上游源码结构发生变化。"
@@ -804,6 +818,7 @@ main() {
   prompt_value HTTP_PORT "请输入HTTP端口" "3340"
   detect_latest_versions
   prompt_version_value GO_VERSION "Go（不要带 go 前缀）" "$GO_LATEST_VERSION" "$GO_FALLBACK_VERSION"
+  prompt_version_value TAILSCALE_VERSION "Tailscale DERP" "$TAILSCALE_LATEST_VERSION" "$TAILSCALE_FALLBACK_VERSION"
   prompt_version_value HEADSCALE_VERSION "Headscale" "$HEADSCALE_LATEST_VERSION" "$HEADSCALE_FALLBACK_VERSION"
   prompt_panel_type
   if [[ "$PANEL_TYPE" == "headplane" ]]; then
@@ -822,7 +837,7 @@ main() {
   show_firewall_notice
   install_base_packages
   install_go "$GO_VERSION"
-  install_derp
+  install_derp "$TAILSCALE_VERSION"
   install_tailscale
   install_headscale "$HEADSCALE_VERSION"
   configure_headscale

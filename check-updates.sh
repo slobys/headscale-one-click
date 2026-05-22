@@ -31,6 +31,10 @@ fetch_latest_headscale() {
   curl_quick https://api.github.com/repos/juanfont/headscale/releases/latest | grep '"tag_name"' | head -n 1 | sed -E 's/.*"v?([^"]+)".*/\1/'
 }
 
+fetch_latest_tailscale() {
+  curl_quick https://api.github.com/repos/tailscale/tailscale/releases/latest | grep '"tag_name"' | head -n 1 | sed -E 's/.*"v?([^"]+)".*/\1/'
+}
+
 fetch_latest_headscale_ui() {
   curl_quick https://api.github.com/repos/gurucomputing/headscale-ui/releases/latest | grep '"tag_name"' | head -n 1 | sed -E 's/.*"v?([^"]+)".*/\1/'
 }
@@ -47,21 +51,24 @@ main() {
   info "检查上游最新版本..."
 
   local go_version="unknown"
+  local tailscale_version="unknown"
   local headscale_version="unknown"
   local headscale_ui_version="unknown"
   local headplane_version="unknown"
 
   go_version="$(fetch_latest_go 2>/dev/null || echo unknown)"
+  tailscale_version="$(fetch_latest_tailscale 2>/dev/null || echo unknown)"
   headscale_version="$(fetch_latest_headscale 2>/dev/null || echo unknown)"
   headscale_ui_version="$(fetch_latest_headscale_ui 2>/dev/null || echo unknown)"
   headplane_version="$(fetch_latest_headplane 2>/dev/null || echo unknown)"
 
   echo
   echo "当前建议关注的上游最新版本："
-  echo "- Go:            ${go_version}"
-  echo "- Headscale:     ${headscale_version}"
-  echo "- Headscale-ui:  ${headscale_ui_version}"
-  echo "- Headplane:     ${headplane_version}"
+  echo "- Go:              ${go_version}"
+  echo "- Tailscale DERP:  ${tailscale_version}"
+  echo "- Headscale:       ${headscale_version}"
+  echo "- Headscale-ui:    ${headscale_ui_version}"
+  echo "- Headplane:       ${headplane_version}"
   echo
 
   warn "安装和更新流程默认会使用查询到的最新版。"
