@@ -95,34 +95,6 @@ http://1.2.3.4:8080/web
 
 系统升级会执行 `apt upgrade -y`。新服务器可以执行；已经跑业务的服务器建议先跳过。
 
-## 管理面板选择
-
-安装时可以选择：
-
-- `headache-ui`：默认选项，访问路径 `/web`，更适合作为稳定方案
-- `Headplane`：访问路径 `/admin`，原生部署
-
-如果不确定，直接选择默认的 `headache-ui`。
-
-## 中国大陆服务器说明
-
-脚本会自动尝试更适合中国大陆网络的下载线路：
-
-- 安装入口优先使用 jsDelivr，避免 GitHub Raw 静默卡住
-- 项目拉取优先使用源码包下载，失败后再用 Git 兜底
-- Go 优先尝试 `golang.google.cn`
-- GitHub Release 文件优先尝试加速线路，再回退到官方地址
-- Go 依赖使用 `https://goproxy.cn,direct`
-- Headplane 前端依赖使用 `https://registry.npmmirror.com`
-
-如果服务器网络仍然不稳定，可以提前把安装文件放到 `/root/` 或项目目录，脚本会优先使用本地文件。
-
-常见本地文件名：
-
-- `go1.26.3.linux-amd64.tar.gz` 或 arm64 对应版本
-- `headscale_0.28.0_linux_amd64.deb` 或 arm64 对应版本
-- `headscale-ui.zip`
-
 ## 安装完成后
 
 管理面板地址：
