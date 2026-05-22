@@ -1,470 +1,206 @@
 # headscale-one-click
 
-一个面向 **中国大陆云服务器 / VPS** 的 **Headscale + 可选管理面板 + DERP 一键安装项目**。
+一键部署 **Headscale + DERP + 管理面板**，适合在 Debian / Ubuntu 云服务器上快速搭建自己的 Tailscale 控制端。
 
-基于已经实际跑通的方案整理而来，目标不是只给出几个能跑的命令，而是做成一套更适合长期维护、公开分享和 GitHub 发布的脚本项目。
+脚本会自动安装 Headscale、DERP、Nginx 和管理面板，并优先使用对中国大陆服务器更友好的下载线路。
 
-仓库地址：
+## 快速安装
 
-```text
-https://github.com/slobys/headscale-one-click
-```
-
-## 一句话说明
-
-这是一个适合中国大陆云服务器使用的 Headscale + 可选管理面板 + DERP 一键安装项目，默认支持现有的 headache-ui，并可选安装 Headplane（当前视为实验性），支持本地安装文件优先、菜单管理、版本检查、修复脚本，以及可选启用 DERP 客户端校验。
-
-## 项目亮点
-
-- 单脚本安装：整合 DERP、Headscale、管理面板、Nginx 配置
-- 面板可选：默认保持现有 headache-ui 安装方式，也可选 Headplane（原生模式，当前视为实验性）
-- 中国大陆网络友好：支持本地安装文件优先，尽量降低外部下载源不稳定带来的失败率
-- 保留原方案思路：尽量贴近已验证可用的部署做法
-- 带维护脚本：包含安装、更新、卸载、修复、菜单管理、版本检查
-- 支持可选启用 DERP 客户端校验（`--verify-clients`）
-- 适合公开发布：补齐 README、CHANGELOG、.gitignore
-- 默认使用已验证的稳定版本，同时允许手动输入自定义版本
-
----
-
-## 快速开始
-
-如果你只想先跑起来，直接用一条命令即可：
+使用 root 用户执行：
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/slobys/headscale-one-click/main/bootstrap.sh)
 ```
 
-这条命令会自动拉取 / 更新项目到 `/root/headscale-one-click`，补齐脚本执行权限，安装快捷命令 `hs`，然后启动交互式安装。
+这条命令会自动：
 
-安装完成后，可以随时使用菜单：
+- 拉取 / 更新项目到 `/root/headscale-one-click`
+- 补齐脚本执行权限
+- 安装快捷菜单命令 `hs`
+- 启动交互式安装
+
+安装完成后，随时输入下面命令打开管理菜单：
 
 ```bash
 hs
 ```
 
-如果你想直接进入菜单而不是安装：
+如果只想打开菜单，不直接安装：
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/slobys/headscale-one-click/main/bootstrap.sh) --menu
 ```
-
-也可以使用传统方式手动拉取后安装：
-
-```bash
-git clone https://github.com/slobys/headscale-one-click.git
-cd headscale-one-click
-chmod +x install.sh update.sh uninstall.sh repair.sh menu.sh check-updates.sh
-sudo ./install.sh
-```
-
-如果部署环境位于中国大陆网络，脚本会自动优先尝试国内友好的下载线路；你也可以提前把安装文件传到 `/root/` 或项目目录，脚本会优先使用本地文件。
-
-### 方式一：一条命令安装（推荐）
-
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/slobys/headscale-one-click/main/bootstrap.sh)
-```
-
-### 方式二：使用菜单管理脚本
-
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/slobys/headscale-one-click/main/bootstrap.sh) --menu
-```
-
-### 方式三：直接从 GitHub 拉取后安装
-
-```bash
-git clone https://github.com/slobys/headscale-one-click.git
-cd headscale-one-click
-chmod +x install.sh update.sh uninstall.sh repair.sh menu.sh check-updates.sh
-sudo ./install.sh
-```
-
-### 方式四：手动使用菜单管理脚本
-
-```bash
-git clone https://github.com/slobys/headscale-one-click.git
-cd headscale-one-click
-chmod +x install.sh update.sh uninstall.sh repair.sh menu.sh check-updates.sh
-sudo ./menu.sh
-```
-
-### 方式五：先检查上游是否有新版本
-
-```bash
-git clone https://github.com/slobys/headscale-one-click.git
-cd headscale-one-click
-chmod +x check-updates.sh
-./check-updates.sh
-```
-
-### 中国大陆服务器环境下载说明
-
-脚本默认会自动下载所需安装文件，并优先尝试更适合中国大陆网络的线路。尤其适合：
-
-- 阿里云 / 腾讯云 / 华为云等中国大陆云服务器
-- GitHub / go.dev / tailscale.com 偶发访问不稳定的环境
-- 想减少安装中途失败概率的场景
-
-当前会自动拉取：
-
-- `go1.26.3.linux-amd64.tar.gz` 或 arm64 对应版本
-- `headscale_0.28.0_linux_amd64.deb` 或 arm64 对应版本
-- `headscale-ui.zip`
-- Headplane 源码包（选择 Headplane 时）
-
-如果服务器网络仍然无法下载，也可以把这些文件上传到 `/root/` 或脚本当前目录，脚本会优先使用本地文件。
-
----
-
-## 项目说明
-
-这个项目整合了两部分：
-
-1. `tailscale.sh` 的 DERP 安装逻辑
-2. `headache.sh` 的 Headscale + Headscale Web UI + Nginx 配置逻辑
-
-最终收敛成一个 `install.sh`，目标效果是：
-
-```bash
-chmod +x install.sh
-sudo ./install.sh
-```
-
-然后按提示输入参数，自动完成：
-
-- Go 安装
-- DERP 编译和部署
-- Tailscale 客户端安装
-- Headscale 安装
-- 按所选面板完成部署（headache-ui 或 Headplane）
-- Nginx 配置
-- Headscale 配置修改
-- DERP JSON 生成
-- API Key 生成
-
----
-
-## 适合谁用
-
-这个项目尤其适合以下场景：
-
-- 想在中国大陆 VPS / 云服务器上部署 Headscale
-- 想同时配好 Headscale 管理面板和自建 DERP
-- 不想再手工拆开多个脚本逐步执行
-- 想做成可长期维护、可上传 GitHub 的脚本项目
-- 想控制 DERP 被公网其他客户端白嫖的风险
 
 ## 适用环境
 
-当前版本优先面向：
-
 - Debian / Ubuntu
-- 中国大陆 VPS / 云服务器
-- root 环境
 - x86_64 / arm64
+- root 用户
+- 建议使用全新 VPS 或没有重要业务的服务器
 
-> 当前版本优先按 Debian / Ubuntu 流程做，CentOS 系暂未纳入这版单脚本。
-
----
-
-## 中国大陆服务器使用说明
-
-本项目针对 **中国大陆服务器可安装** 场景，做了几个关键处理：
-
-### 1. Go 使用国内代理
-
-脚本内会自动设置：
-
-```bash
-go env -w GOPROXY=https://goproxy.cn,direct
-```
-
-### 2. 安装文件自动下载并使用备用线路
-
-Go 会优先尝试 `golang.google.cn`，GitHub Release 文件会优先尝试 GitHub 加速线路，再回退到官方地址。
-
-脚本会自动下载：
-
-- `go1.26.3.linux-amd64.tar.gz` 或 arm64 对应版本
-- `headscale_0.28.0_linux_amd64.deb` 或 arm64 对应版本
-- `headscale-ui.zip`
-- Headplane 源码包（选择 Headplane 时）
-
-### 3. 本地文件仍然优先
-
-如果你已经把安装文件传到 `/root/` 或当前目录，脚本会优先使用本地文件，不强依赖外网下载。
-
-### 4. Headplane 依赖使用国内镜像
-
-选择 Headplane 时，脚本会把 npm/pnpm registry 设置为 `https://registry.npmmirror.com`，减少前端依赖安装失败概率。
----
-
-## 文件结构
-
-```bash
-headscale-one-click/
-├─ README.md
-├─ CHANGELOG.md
-├─ .gitignore
-├─ install.sh
-├─ update.sh
-├─ uninstall.sh
-├─ repair.sh
-└─ menu.sh
-```
-
----
+暂不建议直接用于 CentOS / Rocky / AlmaLinux。
 
 ## 安装前准备
 
-### 1）准备域名
+你需要准备：
 
-用于 DERP 自签名证书，例如：
+- 一台有公网 IP 的服务器
+- 已放行所需端口的云安全组 / 防火墙
+- 一个域名更佳，没有域名也可以先用公网 IP 测试
 
-```text
-derp.example.com
-```
+建议放行这些端口：
 
-### 2）确认服务器公网 IP
+- `22/tcp`：SSH
+- `80/tcp`、`443/tcp`：如后续接入 HTTP / HTTPS 反代
+- Headscale 对外端口，默认 `8080`
+- DERP 服务端口，默认 `12345`
+- DERP HTTP 端口，默认 `3340`
 
-脚本会优先自动识别公网 IPv4，并将识别结果作为默认值；如有特殊需求，也可手动修改。例如：
+如果公网访问不了，但服务器本机能访问，优先检查云平台安全组。
+
+## 没有域名怎么办
+
+只是测试时，可以在安装提示里把“域名”和“服务器 IP”都填服务器公网 IP。
+
+例如：
 
 ```text
 1.2.3.4
 ```
 
-### 3）准备 Headscale Web UI 压缩包
-
-由于 Headscale Web UI 资源在中国大陆网络环境中下载不一定稳定，建议先把压缩包上传到：
-
-- `/root/headscale-ui.zip`
-
-或者脚本当前目录。
-
-### 4）手动放行端口
-
-这版脚本不会直接像原始脚本那样清空防火墙。
-
-请你自行确认这些端口已放行：
-
-- Headscale 端口
-- DERP 服务端口
-- DERP HTTP 端口
-- 如果用 80/443 反代，也要放行 80/443
-
----
-
-## 使用方法
-
-先给脚本执行权限：
-
-```bash
-chmod +x install.sh
-```
-
-然后执行：
-
-```bash
-sudo ./install.sh
-```
-
-### 关于系统升级选项
-
-安装脚本会先询问是否执行：
-
-```bash
-apt upgrade -y
-```
-
-默认建议根据实际环境决定：
-
-- 新系统 / 干净测试机：可以选择执行
-- 已跑业务的 VPS / 面板机 / NAS：更建议谨慎，必要时先跳过
-
-这样可以减少安装过程中因系统升级触发其它服务重启而带来的干扰。
-
-脚本会依次询问：
-
-- 是否先执行系统升级（`apt upgrade -y`）
-- 域名
-- 服务器 IP（默认会自动识别公网 IPv4，也可手动修改）
-- Headscale 端口
-- IP 前缀
-- DERP 端口
-- HTTP 端口
-- Go 版本
-- Headscale 版本
-- 面板类型（默认 headache-ui，也可选 Headplane）
-- 如果选择 Headplane，会继续询问 Headplane 版本
-
-说明：
-
-- Go 和 Headscale 这里填写的是版本号
-- 如果你选择默认的 headache-ui，压缩包文件名固定为 `headscale-ui.zip`
-- 如果你选择 Headplane，脚本会自动安装 Node.js 22、pnpm 10.4.x，并在本机原生构建
-
-常见示例：
-
-- 域名：`derp.example.com`
-- 服务器IP：`1.2.3.4`
-- Headscale端口：`8080`
-- IP前缀：`100.64.0.0`
-- DERP端口：`12345`
-- HTTP端口：`3340`
-- Go版本：`1.26.3`
-- Headscale版本：`0.28.0`
-- 面板类型：默认选 `1`
-- Headscale Web UI 压缩包固定为：`headscale-ui.zip`
-- 如果选择 Headplane，默认版本为：`0.6.3`
-
-这里的 Headscale 端口是对外访问端口，由 Nginx 监听并反代到本机内部 Headscale 服务。
-脚本会把 Headscale 内部监听端口固定为 `127.0.0.1:18080`，避免和 Nginx 默认对外端口 `8080` 冲突。
-
-### 面板选择说明
-
-当前脚本支持两种面板：
-
-- `headache-ui`，默认选项，保持当前脚本原有行为不变
-- `Headplane`，原生部署方式，访问路径为 `/admin`，**当前视为实验性**
-
-为了不影响现有可用方案，脚本默认仍然走 `headache-ui -> /web` 这条路线。
-只有在安装时明确选择 Headplane，才会额外安装其依赖和服务。
-
-> 注意：目前 Headplane 在部分环境下虽然服务端链路可用，但浏览器侧登录流程仍可能异常。
-> 因此现阶段不应视为稳定可交付方案，更适合测试、验证和后续迭代。
-
----
-
-## DERP 客户端校验说明
-
-这是本项目比较实用、也比较有辨识度的一个功能点。
-
-原方案里的“防白嫖”功能，本质上是通过为 `derp` 增加：
-
-```bash
---verify-clients
-```
-
-来限制谁可以使用当前服务器提供的 DERP 中继服务。
-
-### 它的实际作用
-
-- 降低公网其他客户端滥用 DERP 中继的风险
-- 减少带宽、流量和中继资源被无关节点占用
-- 让 DERP 更偏向只服务于当前 Headscale 网络节点
-
-### 为什么不建议一开始就默认强开
-
-因为如果 Headscale、DERP、客户端接入流程还没完全跑通，过早启用它，可能会导致：
-
-- 自己的客户端也无法正常通过 DERP
-- 看起来像 DERP 挂了
-- 增加排障难度
-
-所以当前脚本采用的是：
-
-- 安装完成后询问是否启用
-- 默认不强制启用
-- 建议在确认环境已经正常后再打开
-
-### 手动开启方法
-
-编辑：
-
-```bash
-/etc/systemd/system/derp.service
-```
-
-在 `ExecStart` 最后追加：
-
-```bash
---verify-clients
-```
-
-然后执行：
-
-```bash
-systemctl daemon-reload
-systemctl restart derp
-```
-
-## 安装完成后
-
-安装完成后，可通过下面地址访问：
-
-```text
-http://服务器IP:Headscale端口/web
-```
-
-例如：
+这样可以先通过 HTTP 跑起来：
 
 ```text
 http://1.2.3.4:8080/web
 ```
 
-客户端接入命令：
+长期使用仍然建议准备一个域名。DERP、HTTPS 证书和客户端连接稳定性都更适合使用域名。
+
+## 安装时会问什么
+
+脚本会按提示询问：
+
+- 是否执行系统升级
+- 域名
+- 服务器 IP
+- Headscale 端口，默认 `8080`
+- IP 前缀，默认 `100.64.0.0`
+- DERP 服务端口，默认 `12345`
+- DERP HTTP 端口，默认 `3340`
+- Go 版本，默认 `1.26.3`
+- Headscale 版本，默认 `0.28.0`
+- 管理面板类型
+
+一般情况下直接回车使用默认值即可。
+
+系统升级会执行 `apt upgrade -y`。新服务器可以执行；已经跑业务的服务器建议先跳过。
+
+## 管理面板选择
+
+安装时可以选择：
+
+- `headache-ui`：默认选项，访问路径 `/web`，更适合作为稳定方案
+- `Headplane`：访问路径 `/admin`，当前更适合测试
+
+如果不确定，直接选择默认的 `headache-ui`。
+
+## 中国大陆服务器说明
+
+脚本会自动尝试更适合中国大陆网络的下载线路：
+
+- Go 优先尝试 `golang.google.cn`
+- GitHub Release 文件优先尝试加速线路，再回退到官方地址
+- Go 依赖使用 `https://goproxy.cn,direct`
+- Headplane 前端依赖使用 `https://registry.npmmirror.com`
+
+如果服务器网络仍然不稳定，可以提前把安装文件放到 `/root/` 或项目目录，脚本会优先使用本地文件。
+
+常见本地文件名：
+
+- `go1.26.3.linux-amd64.tar.gz` 或 arm64 对应版本
+- `headscale_0.28.0_linux_amd64.deb` 或 arm64 对应版本
+- `headscale-ui.zip`
+
+## 安装完成后
+
+管理面板地址：
+
+```text
+http://服务器IP:Headscale端口/web
+```
+
+示例：
+
+```text
+http://1.2.3.4:8080/web
+```
+
+客户端接入：
 
 ```bash
 tailscale up --login-server=http://服务器IP:Headscale端口
 ```
 
-例如：
+示例：
 
 ```bash
 tailscale up --login-server=http://1.2.3.4:8080
 ```
 
-子网路由参考：
+如果需要接收子网路由：
 
 ```bash
 tailscale up --login-server=http://1.2.3.4:8080 --accept-routes=true
 ```
 
-或：
+如果需要发布子网路由：
 
 ```bash
 tailscale up --login-server=http://1.2.3.4:8080 --accept-routes=true --accept-dns=false --advertise-routes=192.168.2.0/24 --reset
 ```
 
----
+## 常用管理
 
-## 与原始脚本相比的调整
+打开菜单：
 
-这版整合脚本保留了你原始方案的核心逻辑，但做了这些整理：
+```bash
+hs
+```
 
-- 把两个脚本合并成一个 `install.sh`
-- 增加错误处理和日志输出
-- 增加系统与架构检测
-- 增加本地安装文件优先逻辑
-- 不默认直接关闭系统防火墙
-- Nginx 改为独立站点配置，避免直接覆盖默认站点
-- 增加 Headscale Web UI 解压结果校验
-- 增加 DERP 源码修改生效校验
-- 安装顺序更清晰
-- 更适合直接作为 GitHub 项目发布
+菜单里可以执行：
 
----
+- 安装 / 重新安装
+- 更新
+- 卸载
+- 查看服务状态
+- 重启服务
+- 查看常用路径
+- 修复
+- 检查上游新版本
 
-## 注意事项
+也可以进入项目目录手动执行：
 
-### 1）这版仍然保留了原方案的 DERP 修改方式
+```bash
+cd /root/headscale-one-click
+sudo ./update.sh
+sudo ./repair.sh
+sudo ./check-updates.sh
+sudo ./uninstall.sh
+```
 
-也就是对 `cert.go` 做注释处理，以适配你当前验证可用的方案。
+## DERP 客户端校验
 
-这意味着：
+安装完成后，脚本会询问是否启用 DERP 客户端校验。
 
-- 更接近你现有脚本的行为
-- 但也意味着后续上游源码变动时，可能需要重新调整
+启用后会给 `derp.service` 增加：
 
-### 2）Headscale Web UI 建议本地上传
+```bash
+--verify-clients
+```
 
-中国大陆服务器环境中，很多外部下载源不稳定。Headscale Web UI 最好先下载好，再上传到服务器。
+它可以减少公网其他客户端滥用你的 DERP 中继，但建议先确认 Headscale、DERP 和客户端接入都正常，再开启这个选项。
 
-### 3）如果后面继续按博客做“白嫖”设置
-
-可手动编辑：
+如需手动开启，编辑：
 
 ```bash
 /etc/systemd/system/derp.service
@@ -476,187 +212,39 @@ tailscale up --login-server=http://1.2.3.4:8080 --accept-routes=true --accept-dn
 --verify-clients
 ```
 
-然后执行：
+然后重启服务：
 
 ```bash
 systemctl daemon-reload
 systemctl restart derp
 ```
 
----
-
-## 管理脚本
-
-### 安装
-
-```bash
-sudo ./install.sh
-```
-
-### 更新
-
-```bash
-sudo ./update.sh
-```
-
-当前 `update.sh` 主要用于：
-
-- 根据当前已安装面板执行更新
-- 校验并重启 Nginx
-- 重启 Headscale / DERP / Headplane（如果已安装）服务
-
-### 卸载
-
-```bash
-sudo ./uninstall.sh
-```
-
-用于删除：
-
-- derp.service
-- DERP 证书
-- 当前已安装的管理面板
-- 当前脚本生成的 Nginx 独立站点配置
-- Headscale
-
-### 修复
-
-```bash
-sudo ./repair.sh
-```
-
-适合用于基础排查和快速修复，会尝试：
-
-- 检查 nginx 是否存在
-- 检查 DERP / Headscale 配置文件是否存在
-- 根据当前面板类型检查 headache-ui 或 Headplane 相关目录
-- 校验 Nginx 配置
-- 重启 derp / headscale / nginx / headplane（如果已安装）
-
-### 菜单管理
-
-```bash
-sudo ./menu.sh
-```
-
-适合不想记命令的场景，可以通过菜单执行安装、更新、卸载、修复、查看状态和重启服务。
-
----
-
-## 版本策略说明
-
-这个项目不建议做成“永远自动追最新版本安装”。
-
-原因很简单：
-
-- Go 会更新
-- Headscale 会更新
-- Headscale Web UI 也会更新
-- 上游 release 文件名、配置模板、压缩包结构都可能变化
-
-如果安装脚本强行永远追最新，长期来看反而更容易翻车。
-
-所以当前项目采用的是：
-
-### 默认策略
-- `install.sh` 默认使用当前已整理的稳定版本
-- 运行时可手动输入其它 Go / Headscale 版本
-
-### 长期维护策略
-- 通过 `check-updates.sh` 查看上游是否有新版本
-- 先手动测试新版本是否兼容
-- 确认可用后，再更新仓库默认值
-
-这比“盲目自动追最新”更适合公开一键脚本项目长期维护。
-
-## 推荐仓库名
+## 常用路径
 
 ```text
-headscale-one-click
+/root/headscale-one-click                  项目目录
+/etc/headscale/config.yaml                 Headscale 配置
+/etc/systemd/system/derp.service           DERP 服务
+/var/www/derp.json                         DERP 配置 JSON
+/var/www/web                               headache-ui 目录
+/opt/headplane                             Headplane 目录
+/etc/nginx/sites-available/headscale-one-click.conf  Nginx 站点配置
 ```
 
-## 推荐仓库描述
+## 版本策略
 
-```text
-One-click installer for Headscale, Headscale UI and DERP server, optimized for China mainland VPS.
-```
+脚本默认使用当前测试过的版本，不会盲目追最新上游版本。
 
-## 推荐 Topics
-
-```text
-headscale tailscale derp vpn self-hosted linux bash china nginx
-```
-
----
-
-## GitHub 上传命令
+你可以用下面命令检查上游版本：
 
 ```bash
-git init
-git add .
-git commit -m "feat: add one-click installer for headscale derp and ui"
-git branch -M main
-git remote add origin <repository-url>
-git push -u origin main
+hs
 ```
 
-如果你要做一个更像公开项目的首发仓库，推荐提交前确认以下几点：
+然后选择“检查上游最新版本”。
 
-- `README.md` 里的端口、文件名、版本号是否与你视频/博客一致
-- `install.sh` 中默认版本是否需要固定
-- 是否把测试用安装文件留在仓库外，不要一起提交
-- 是否补一个仓库截图或博客链接，方便 GitHub 首页展示
-
----
-
-## 发布前自检建议
-
-正式发 GitHub 之前，建议你自己再过一遍这几项：
-
-1. 在一台全新 Debian / Ubuntu 机器上完整跑一次 `install.sh`
-2. 确认 `/root/` 本地安装文件优先逻辑正常
-3. 确认 `headscale-ui.zip` 解压后目录结构确实落在 `/var/www/web`
-4. 确认 `http://服务器IP:Headscale端口/web` 能正常打开
-5. 确认 `headscale apikeys create --expiration 9999d` 在目标版本中可用
-6. 确认 `menu.sh`、`update.sh`、`repair.sh` 都能正常执行
-7. 确认博客中的命令示例与你仓库 README 一致
-
----
-
-## 博客 / 视频配套建议
-
-如果后续计划将本项目配套到博客或视频中，建议这样组织：
-
-- 博客正文讲原理和操作步骤
-- GitHub 仓库放最终脚本项目
-- README 首页只讲最核心的安装与使用
-- 把“中国大陆服务器建议先上传本地安装文件”写在前面显眼位置
-
-这样读者更容易跟着跑，也更像一个完整作品。
-
----
-
-## 后续可继续扩展
-
-如果后续计划将本项目继续扩展为更完整的公开项目，建议继续增加：
-
-- 一键申请 HTTPS 证书
-- 一键创建 namespace / preauth key / users
-- DERP / Headscale 状态检测增强
-- 自动检测公网 IP / 域名解析
-- 一键切换 DERP / Headscale 下载源
-- 自动备份并恢复 Headscale 关键配置
-
----
+确认新版本可用后，再通过脚本更新默认值会更稳。
 
 ## 免责声明
 
-本项目仅供学习、测试、自建环境部署参考。
-
-请在理解以下风险后再用于公网环境：
-
-- 自签名证书风险
-- 防火墙策略风险
-- DERP 修改源码风险
-- 上游文件名或源码结构变化风险
-- 公网暴露风险
+本项目仅供学习、测试和自建环境使用。请确认你理解公网暴露、自签名证书、防火墙配置、DERP 源码适配和上游版本变化带来的风险。
