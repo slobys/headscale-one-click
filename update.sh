@@ -22,7 +22,8 @@ die() {
 PANEL_STATE_FILE="/etc/headscale-one-click/panel.env"
 HEADPLANE_DIR="/opt/headplane"
 HEADPLANE_SERVICE="/etc/systemd/system/headplane.service"
-HEADSCALE_UI_VERSION="2026.03.17"
+HEADPLANE_FALLBACK_VERSION="0.6.3"
+HEADSCALE_UI_FALLBACK_VERSION="2026.03.17"
 
 load_panel_state() {
   PANEL_TYPE="headache-ui"
@@ -67,6 +68,36 @@ find_or_download_file() {
   die "下载失败：${filename}。可手动上传到 /root/ 或脚本当前目录后重试。"
 }
 
+curl_quick() {
+  curl -fsSL --connect-timeout 15 --max-time 45 "$@"
+}
+
+fetch_latest_headscale_ui() {
+  curl_quick https://api.github.com/repos/gurucomputing/headscale-ui/releases/latest | grep '"tag_name"' | head -n 1 | sed -E 's/.*"v?([^"]+)".*/\1/'
+}
+
+fetch_latest_headplane() {
+  curl_quick https://api.github.com/repos/tale/headplane/releases/latest | grep '"tag_name"' | head -n 1 | sed -E 's/.*"v?([^"]+)".*/\1/'
+}
+
+prompt_version_value() {
+  local var_name="$1"
+  local name="$2"
+  local latest_value="$3"
+  local fallback_value="$4"
+  local default_value="$latest_value"
+  local input_value=""
+
+  if [[ -z "$default_value" || "$default_value" == "unknown" ]]; then
+    default_value="$fallback_value"
+    warn "${name} 最新版本查询失败，默认使用已验证版本 ${fallback_value}。"
+  fi
+
+  read -r -p "请输入 ${name} 版本 [默认: 最新 ${default_value}，可手动输入旧版本]: " input_value || true
+  input_value="${input_value:-$default_value}"
+  printf -v "$var_name" '%s' "$input_value"
+}
+
 cat <<EOF
 这个 update.sh 适合做以下事情：
 - 重新部署 Headscale Web UI
@@ -94,8 +125,8 @@ NGINX_FALLBACK_CONF="/etc/nginx/sites-available/default"
 load_panel_state
 
 if [[ "$PANEL_TYPE" == "headplane" ]]; then
-  read -r -p "请输入要更新到的 Headplane 版本 [默认: 0.6.3]: " HEADPLANE_VERSION
-  HEADPLANE_VERSION="${HEADPLANE_VERSION:-0.6.3}"
+  HEADPLANE_LATEST_VERSION="$(fetch_latest_headplane 2>/dev/null || echo unknown)"
+  prompt_version_value HEADPLANE_VERSION "Headplane" "$HEADPLANE_LATEST_VERSION" "$HEADPLANE_FALLBACK_VERSION"
 
   info "准备更新 Headplane 到 v${HEADPLANE_VERSION} ..."
   [[ -d "$HEADPLANE_DIR" ]] || die "未检测到 ${HEADPLANE_DIR}，当前看起来不像已安装 Headplane。"
@@ -132,6 +163,9 @@ if [[ "$PANEL_TYPE" == "headplane" ]]; then
 
   success "Headplane 更新完成。"
 else
+  HEADSCALE_UI_LATEST_VERSION="$(fetch_latest_headscale_ui 2>/dev/null || echo unknown)"
+  prompt_version_value HEADSCALE_UI_VERSION "Headscale-ui" "$HEADSCALE_UI_LATEST_VERSION" "$HEADSCALE_UI_FALLBACK_VERSION"
+
   UI_ZIP="headscale-ui.zip"
   UI_URL="https://github.com/gurucomputing/headscale-ui/releases/download/${HEADSCALE_UI_VERSION}/${UI_ZIP}"
 

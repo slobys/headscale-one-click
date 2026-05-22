@@ -11,7 +11,11 @@ NGINX_ENABLED="/etc/nginx/sites-enabled/${NGINX_SITE_NAME}.conf"
 HEADSCALE_CONFIG="/etc/headscale/config.yaml"
 HEADSCALE_UI_DIR="/var/www/web"
 HEADSCALE_INTERNAL_PORT="18080"
-HEADSCALE_UI_VERSION="2026.03.17"
+GO_FALLBACK_VERSION="1.26.3"
+HEADSCALE_FALLBACK_VERSION="0.28.0"
+HEADSCALE_UI_FALLBACK_VERSION="2026.03.17"
+HEADPLANE_FALLBACK_VERSION="0.6.3"
+HEADSCALE_UI_VERSION="${HEADSCALE_UI_FALLBACK_VERSION}"
 DERP_JSON="/var/www/derp.json"
 PANEL_STATE_DIR="/etc/headscale-one-click"
 PANEL_STATE_FILE="${PANEL_STATE_DIR}/panel.env"
@@ -65,6 +69,52 @@ prompt_value() {
   read -r -p "${prompt_text} [默认: ${default_value}]: " input_value || true
   input_value="${input_value:-$default_value}"
   printf -v "$var_name" '%s' "$input_value"
+}
+
+prompt_version_value() {
+  local var_name="$1"
+  local name="$2"
+  local latest_value="$3"
+  local fallback_value="$4"
+  local default_value="$latest_value"
+  local input_value=""
+
+  if [[ -z "$default_value" || "$default_value" == "unknown" ]]; then
+    default_value="$fallback_value"
+    warn "${name} 最新版本查询失败，默认使用已验证版本 ${fallback_value}。"
+  fi
+
+  read -r -p "请输入 ${name} 版本 [默认: 最新 ${default_value}，可手动输入旧版本]: " input_value || true
+  input_value="${input_value:-$default_value}"
+  printf -v "$var_name" '%s' "$input_value"
+}
+
+curl_quick() {
+  curl -fsSL --connect-timeout 15 --max-time 45 "$@"
+}
+
+fetch_latest_go() {
+  curl_quick https://golang.google.cn/VERSION?m=text | head -n 1 | sed 's/^go//'
+}
+
+fetch_latest_headscale() {
+  curl_quick https://api.github.com/repos/juanfont/headscale/releases/latest | grep '"tag_name"' | head -n 1 | sed -E 's/.*"v?([^"]+)".*/\1/'
+}
+
+fetch_latest_headscale_ui() {
+  curl_quick https://api.github.com/repos/gurucomputing/headscale-ui/releases/latest | grep '"tag_name"' | head -n 1 | sed -E 's/.*"v?([^"]+)".*/\1/'
+}
+
+fetch_latest_headplane() {
+  curl_quick https://api.github.com/repos/tale/headplane/releases/latest | grep '"tag_name"' | head -n 1 | sed -E 's/.*"v?([^"]+)".*/\1/'
+}
+
+detect_latest_versions() {
+  info "查询 Go / Headscale / Headscale-ui / Headplane 最新版本..."
+  GO_LATEST_VERSION="$(fetch_latest_go 2>/dev/null || echo unknown)"
+  HEADSCALE_LATEST_VERSION="$(fetch_latest_headscale 2>/dev/null || echo unknown)"
+  HEADSCALE_UI_LATEST_VERSION="$(fetch_latest_headscale_ui 2>/dev/null || echo unknown)"
+  HEADPLANE_LATEST_VERSION="$(fetch_latest_headplane 2>/dev/null || echo unknown)"
 }
 
 prompt_panel_type() {
@@ -360,11 +410,12 @@ install_headscale() {
 }
 
 install_headscale_ui() {
+  local headscale_ui_version="$1"
   local ui_zip_name="headscale-ui.zip"
   local ui_zip_path="${WORKDIR}/${ui_zip_name}"
-  local ui_url="https://github.com/gurucomputing/headscale-ui/releases/download/${HEADSCALE_UI_VERSION}/${ui_zip_name}"
+  local ui_url="https://github.com/gurucomputing/headscale-ui/releases/download/${headscale_ui_version}/${ui_zip_name}"
 
-  info "获取 Headscale Web UI ${HEADSCALE_UI_VERSION}..."
+  info "获取 Headscale Web UI ${headscale_ui_version}..."
   find_or_download_file "$ui_zip_name" "$ui_zip_path" \
     "https://gh-proxy.com/${ui_url}" \
     "$ui_url"
@@ -731,11 +782,14 @@ main() {
   prompt_value IP_PREFIX "请输入IP前缀（例如：100.64.0.0）" "100.64.0.0"
   prompt_value DERP_PORT "请输入Derp服务端口" "12345"
   prompt_value HTTP_PORT "请输入HTTP端口" "3340"
-  prompt_value GO_VERSION "请输入 Go 版本（不要带 go 前缀，例如 1.26.3）" "1.26.3"
-  prompt_value HEADSCALE_VERSION "请输入 Headscale 版本" "0.28.0"
+  detect_latest_versions
+  prompt_version_value GO_VERSION "Go（不要带 go 前缀）" "$GO_LATEST_VERSION" "$GO_FALLBACK_VERSION"
+  prompt_version_value HEADSCALE_VERSION "Headscale" "$HEADSCALE_LATEST_VERSION" "$HEADSCALE_FALLBACK_VERSION"
   prompt_panel_type
   if [[ "$PANEL_TYPE" == "headplane" ]]; then
-    prompt_value HEADPLANE_VERSION "请输入 Headplane 版本" "0.6.3"
+    prompt_version_value HEADPLANE_VERSION "Headplane" "$HEADPLANE_LATEST_VERSION" "$HEADPLANE_FALLBACK_VERSION"
+  else
+    prompt_version_value HEADSCALE_UI_VERSION "Headscale-ui" "$HEADSCALE_UI_LATEST_VERSION" "$HEADSCALE_UI_FALLBACK_VERSION"
   fi
 
   validate_ipv4 "$SERVER_IP" || die "服务器IP格式不正确。"
@@ -755,7 +809,7 @@ main() {
   if [[ "$PANEL_TYPE" == "headplane" ]]; then
     install_headplane "$HEADPLANE_VERSION"
   else
-    install_headscale_ui
+    install_headscale_ui "$HEADSCALE_UI_VERSION"
   fi
   configure_nginx
   if [[ "$PANEL_TYPE" == "headplane" ]]; then

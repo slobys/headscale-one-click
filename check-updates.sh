@@ -60,12 +60,12 @@ main() {
   echo "当前建议关注的上游最新版本："
   echo "- Go:            ${go_version}"
   echo "- Headscale:     ${headscale_version}"
-  echo "- headache-ui:   ${headscale_ui_version}"
+  echo "- Headscale-ui:  ${headscale_ui_version}"
   echo "- Headplane:     ${headplane_version}"
   echo
 
-  warn "注意：此脚本只负责检查最新版本，不会自动修改 install.sh。"
-  warn "更推荐的维护方式是：先手动测试新版本，再决定是否更新仓库默认值。"
+  warn "安装和更新流程默认会使用查询到的最新版。"
+  warn "如遇到上游兼容性问题，可在版本输入处手动填写旧版本。"
 }
 
 main "$@"
