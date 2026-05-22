@@ -449,13 +449,14 @@ install_headplane() {
   cookie_secret="$(openssl rand -hex 16)"
 
   cat > "$HEADPLANE_CONFIG" <<EOF
-host: "127.0.0.1"
-port: ${HEADPLANE_PORT}
-base_url: "http://${SERVER_IP}:${HEADSCALE_PORT}"
-cookie_secret: "${cookie_secret}"
-cookie_secure: false
-cookie_max_age: 86400
-data_path: "${HEADPLANE_DATA_DIR}"
+server:
+  host: "127.0.0.1"
+  port: ${HEADPLANE_PORT}
+  base_url: "http://${SERVER_IP}:${HEADSCALE_PORT}"
+  cookie_secret: "${cookie_secret}"
+  cookie_secure: false
+  cookie_max_age: 86400
+  data_path: "${HEADPLANE_DATA_DIR}"
 
 headscale:
   url: "http://127.0.0.1:${HEADSCALE_INTERNAL_PORT}"

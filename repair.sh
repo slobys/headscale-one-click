@@ -43,11 +43,11 @@ repair_headplane_config() {
   [[ -f "$HEADPLANE_CONFIG" ]] || return 0
   [[ -f /etc/headscale/config.yaml ]] || return 0
 
-  if ! grep -q '^server:' "$HEADPLANE_CONFIG"; then
+  if grep -q '^server:' "$HEADPLANE_CONFIG"; then
     return 0
   fi
 
-  warn "检测到旧版 Headplane 配置格式，正在转换为 v0.6.x 使用的顶层配置格式..."
+  warn "检测到异常 Headplane 配置格式，正在恢复为 v0.6.x 使用的 server 嵌套格式..."
   server_url="$(awk -F': ' '/^server_url:/ {print $2; exit}' /etc/headscale/config.yaml | tr -d '"')"
   listen_addr="$(awk -F': ' '/^listen_addr:/ {print $2; exit}' /etc/headscale/config.yaml | tr -d '"')"
   cookie_secret="$(awk -F': ' '/cookie_secret:/ {print $2; exit}' "$HEADPLANE_CONFIG" | tr -d '"')"
@@ -60,13 +60,14 @@ repair_headplane_config() {
   mkdir -p "$HEADPLANE_DATA_DIR"
 
   cat > "$HEADPLANE_CONFIG" <<EOF
-host: "127.0.0.1"
-port: 3000
-base_url: "${server_url}"
-cookie_secret: "${cookie_secret}"
-cookie_secure: false
-cookie_max_age: 86400
-data_path: "${HEADPLANE_DATA_DIR}"
+server:
+  host: "127.0.0.1"
+  port: 3000
+  base_url: "${server_url}"
+  cookie_secret: "${cookie_secret}"
+  cookie_secure: false
+  cookie_max_age: 86400
+  data_path: "${HEADPLANE_DATA_DIR}"
 
 headscale:
   url: "http://${listen_addr}"
