@@ -10,6 +10,7 @@
 - 精简 `README.md`，删除重复安装方式、维护者发布建议和项目内部说明，改为面向使用者的安装与使用说明
 - 修复 `repair.sh` 对 Headplane 配置格式的错误转换，保持 Headplane v0.6.x 需要的 `server:` 嵌套配置格式
 - `repair.sh` 会自动把异常顶层配置恢复为 Headplane v0.6.x 使用的 `server:` 嵌套配置格式
+- Headplane systemd 服务改为使用官方默认配置路径，不再额外设置 `HEADPLANE_CONFIG_PATH`
 - API Key 自动生成增加重试，降低 Headscale 刚重启未就绪时的失败概率
 
 ## v1.5.6 - 2026-05-21

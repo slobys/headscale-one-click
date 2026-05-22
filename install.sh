@@ -478,13 +478,13 @@ EOF
 [Unit]
 Description=Headplane Service
 After=network.target headscale.service
-Requires=network.target
+Requires=network.target headscale.service
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 User=root
 WorkingDirectory=${HEADPLANE_DIR}
-Environment=HEADPLANE_CONFIG_PATH=${HEADPLANE_CONFIG}
 ExecStart=/usr/bin/node ${HEADPLANE_DIR}/build/server/index.js
 Restart=on-failure
 RestartSec=5s

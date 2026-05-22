@@ -109,6 +109,12 @@ else
 fi
 
 if [[ "$PANEL_TYPE" == "headplane" ]]; then
+  if [[ -f /etc/systemd/system/headplane.service ]] && grep -q '^Environment=HEADPLANE_CONFIG_PATH=' /etc/systemd/system/headplane.service; then
+    warn "检测到 headplane.service 中存在 HEADPLANE_CONFIG_PATH，按官方默认路径移除该环境变量..."
+    cp -f /etc/systemd/system/headplane.service "/etc/systemd/system/headplane.service.bak.$(date +%s)"
+    sed -i '/^Environment=HEADPLANE_CONFIG_PATH=/d' /etc/systemd/system/headplane.service
+  fi
+
   if [[ ! -d "$HEADPLANE_DIR" ]]; then
     warn "未找到 ${HEADPLANE_DIR}，Headplane 程序目录可能缺失。"
   else
