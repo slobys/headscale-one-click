@@ -8,6 +8,7 @@
 
 ### Changed
 - 面板选择、状态文件默认值和路径说明统一为 `Headscale-ui`
+- GitHub Release 大文件下载增加 `ghfast.top` 加速线路、低速自动切换和 `GITHUB_PROXY_PREFIX` 手动代理前缀
 - `install.sh` 安装时会自动查询 Go、Headscale、Headscale-ui、Headplane 上游最新版，直接回车默认使用最新版，同时保留手动输入旧版本号的能力
 - `update.sh` 更新 Headscale-ui / Headplane 时默认查询并使用上游最新版，同时保留手动输入旧版本号的能力
 - 精简 `README.md`，删除重复安装方式、维护者发布建议和项目内部说明，改为面向使用者的安装与使用说明

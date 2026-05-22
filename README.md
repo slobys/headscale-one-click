@@ -31,6 +31,12 @@ hs
 curl -L --connect-timeout 15 https://cdn.jsdelivr.net/gh/slobys/headscale-one-click@main/bootstrap.sh -o /tmp/hs-bootstrap.sh && bash /tmp/hs-bootstrap.sh --menu
 ```
 
+如果 GitHub Release 下载很慢，可以临时指定自己的加速前缀：
+
+```bash
+GITHUB_PROXY_PREFIX=https://ghfast.top bash /tmp/hs-bootstrap.sh
+```
+
 ## 适用环境
 
 - Debian / Ubuntu

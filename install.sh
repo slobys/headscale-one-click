@@ -255,6 +255,8 @@ find_or_download_file() {
   shift 2
   local urls=("$@")
   local url=""
+  local speed_limit="${DOWNLOAD_LOW_SPEED_LIMIT:-10240}"
+  local speed_time="${DOWNLOAD_LOW_SPEED_TIME:-30}"
 
   if [[ -f "/root/${filename}" ]]; then
     info "检测到本地文件 /root/${filename}，优先使用本地安装文件。"
@@ -272,11 +274,12 @@ find_or_download_file() {
   for url in "${urls[@]}"; do
     [[ -n "$url" ]] || continue
     info "尝试下载：${url}"
-    if curl -fL --retry 3 --connect-timeout 20 --max-time 600 -o "$output_path" "$url"; then
+    rm -f "$output_path"
+    if curl -fL --retry 2 --connect-timeout 15 --max-time 300 --speed-limit "$speed_limit" --speed-time "$speed_time" -o "$output_path" "$url"; then
       success "下载完成：${filename}"
       return 0
     fi
-    warn "该线路下载失败，尝试下一条线路。"
+    warn "该线路下载失败或速度过慢，尝试下一条线路。"
   done
 
   cat <<EOF
@@ -295,6 +298,23 @@ ${RED}[ERROR]${NC} 下载失败：${filename}
 $(printf '%s\n' "${urls[@]}")
 EOF
   return 1
+}
+
+github_download_urls() {
+  local source_url="$1"
+  local custom_prefix="${GITHUB_PROXY_PREFIX:-}"
+
+  if [[ -n "$custom_prefix" ]]; then
+    case "$custom_prefix" in
+      */) printf '%s\n' "${custom_prefix}${source_url}" ;;
+      *) printf '%s\n' "${custom_prefix}/${source_url}" ;;
+    esac
+  fi
+
+  printf '%s\n' \
+    "https://ghfast.top/${source_url}" \
+    "https://gh-proxy.com/${source_url}" \
+    "$source_url"
 }
 
 install_go() {
@@ -396,11 +416,11 @@ install_headscale() {
   local deb_name="headscale_${headscale_version}_linux_${ARCH}.deb"
   local deb_url="https://github.com/juanfont/headscale/releases/download/v${headscale_version}/${deb_name}"
   local deb_file="${WORKDIR}/${deb_name}"
+  local -a download_urls=()
 
   info "安装 Headscale ${headscale_version}..."
-  find_or_download_file "$deb_name" "$deb_file" \
-    "https://gh-proxy.com/${deb_url}" \
-    "$deb_url"
+  mapfile -t download_urls < <(github_download_urls "$deb_url")
+  find_or_download_file "$deb_name" "$deb_file" "${download_urls[@]}"
   mv -f "$deb_file" "${WORKDIR}/headscale.deb"
   dpkg -i "${WORKDIR}/headscale.deb" || apt-get install -f -y
 
@@ -414,11 +434,11 @@ install_headscale_ui() {
   local ui_zip_name="headscale-ui.zip"
   local ui_zip_path="${WORKDIR}/${ui_zip_name}"
   local ui_url="https://github.com/gurucomputing/headscale-ui/releases/download/${headscale_ui_version}/${ui_zip_name}"
+  local -a download_urls=()
 
   info "获取 Headscale Web UI ${headscale_ui_version}..."
-  find_or_download_file "$ui_zip_name" "$ui_zip_path" \
-    "https://gh-proxy.com/${ui_url}" \
-    "$ui_url"
+  mapfile -t download_urls < <(github_download_urls "$ui_url")
+  find_or_download_file "$ui_zip_name" "$ui_zip_path" "${download_urls[@]}"
 
   info "部署 Headscale Web UI..."
   mkdir -p /var/www
@@ -478,14 +498,14 @@ install_headplane() {
   local source_path="${WORKDIR}/${source_name}"
   local source_url="https://github.com/tale/headplane/archive/refs/tags/v${headplane_version}.tar.gz"
   local cookie_secret=""
+  local -a download_urls=()
 
   info "开始安装 Headplane ${headplane_version}（原生模式）..."
   install_headplane_runtime
 
   rm -rf "$HEADPLANE_DIR"
-  find_or_download_file "$source_name" "$source_path" \
-    "https://gh-proxy.com/${source_url}" \
-    "$source_url"
+  mapfile -t download_urls < <(github_download_urls "$source_url")
+  find_or_download_file "$source_name" "$source_path" "${download_urls[@]}"
   mkdir -p "$HEADPLANE_DIR"
   tar -xzf "$source_path" -C "$HEADPLANE_DIR" --strip-components=1
 

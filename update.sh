@@ -42,6 +42,8 @@ find_or_download_file() {
   shift 2
   local urls=("$@")
   local url=""
+  local speed_limit="${DOWNLOAD_LOW_SPEED_LIMIT:-10240}"
+  local speed_time="${DOWNLOAD_LOW_SPEED_TIME:-30}"
 
   if [[ -f "/root/${filename}" ]]; then
     info "检测到本地文件 /root/${filename}，优先使用本地安装文件。"
@@ -59,14 +61,32 @@ find_or_download_file() {
   for url in "${urls[@]}"; do
     [[ -n "$url" ]] || continue
     info "尝试下载：${url}"
-    if curl -fL --retry 3 --connect-timeout 20 --max-time 600 -o "$output_path" "$url"; then
+    rm -f "$output_path"
+    if curl -fL --retry 2 --connect-timeout 15 --max-time 300 --speed-limit "$speed_limit" --speed-time "$speed_time" -o "$output_path" "$url"; then
       success "下载完成：${filename}"
       return 0
     fi
-    warn "该线路下载失败，尝试下一条线路。"
+    warn "该线路下载失败或速度过慢，尝试下一条线路。"
   done
 
   die "下载失败：${filename}。可手动上传到 /root/ 或脚本当前目录后重试。"
+}
+
+github_download_urls() {
+  local source_url="$1"
+  local custom_prefix="${GITHUB_PROXY_PREFIX:-}"
+
+  if [[ -n "$custom_prefix" ]]; then
+    case "$custom_prefix" in
+      */) printf '%s\n' "${custom_prefix}${source_url}" ;;
+      *) printf '%s\n' "${custom_prefix}/${source_url}" ;;
+    esac
+  fi
+
+  printf '%s\n' \
+    "https://ghfast.top/${source_url}" \
+    "https://gh-proxy.com/${source_url}" \
+    "$source_url"
 }
 
 curl_quick() {
@@ -139,9 +159,8 @@ if [[ "$PANEL_TYPE" == "headplane" ]]; then
   backup_dir="${HEADPLANE_DIR}.bak.$(date +%s)"
   staging_dir="${WORKDIR}/headplane-v${HEADPLANE_VERSION}"
 
-  find_or_download_file "$source_name" "$source_path" \
-    "https://gh-proxy.com/${source_url}" \
-    "$source_url"
+  mapfile -t download_urls < <(github_download_urls "$source_url")
+  find_or_download_file "$source_name" "$source_path" "${download_urls[@]}"
 
   rm -rf "$staging_dir"
   mkdir -p "$staging_dir"
@@ -171,9 +190,8 @@ else
   UI_URL="https://github.com/gurucomputing/headscale-ui/releases/download/${HEADSCALE_UI_VERSION}/${UI_ZIP}"
 
   mkdir -p "$WORKDIR"
-  find_or_download_file "$UI_ZIP" "$WORKDIR/${UI_ZIP}" \
-    "https://gh-proxy.com/${UI_URL}" \
-    "$UI_URL"
+  mapfile -t download_urls < <(github_download_urls "$UI_URL")
+  find_or_download_file "$UI_ZIP" "$WORKDIR/${UI_ZIP}" "${download_urls[@]}"
   rm -rf "$HEADSCALE_UI_DIR"
   unzip -o "$WORKDIR/${UI_ZIP}" -d /var/www >/dev/null
   success "Headscale Web UI 更新完成。"
