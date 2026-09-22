@@ -1,28 +1,24 @@
-# headscale-one-click v2.1.0 Release Notes
+# headscale-one-click v2.1.1 Release Notes
 
 ## 标题建议
 
 ```text
-v2.1.0 - 中国大陆 VPS 安装增强
+v2.1.1 - 大陆 VPS 安装可靠性修复
 ```
 
 ## Release 文案
 
 ```markdown
-## headscale-one-click v2.1.0
+## headscale-one-click v2.1.1
 
-这一版重点提升中国大陆 VPS 的一键安装成功率，在 v2.0.0 的 Headscale 0.29 + Peer Relay + 原生 DERP 架构上，减少对单一国外安装脚本的依赖。
+这是 v2.1.0 的可靠性修复版，重点处理“服务器原本已有 Tailscale”以及静态升级失败时的回滚问题，不改变 Headscale 0.29 + Peer Relay + 原生 DERP 的总体架构。
 
-### 核心变化
-- Tailscale 客户端新增本地官方静态包优先安装
-- 官方静态包下载后强制 SHA256 校验，校验失败不会执行
-- `pkgs.tailscale.com` 不通时仍可使用 `/root/` 本地包或自定义可信镜像
-- `tailscale.com/install.sh` 降为最后兜底，不再是唯一安装路径
-- Headplane 的 Node.js 改成二进制包优先，国内优先尝试 npmmirror
-- Node.js 同样强制 SHA256 校验，NodeSource 改为最后兜底
-- 增加 x86_64 / arm64 两套 fallback 校验值
-- 上游版本检查增加 Node.js 22
-- 完整保留 v2.0.0 的 Headscale 0.29、Peer Relay、原生 DERP 与安全升级机制
+### 核心修复
+- Tailscale 静态升级前自动备份已有 CLI、daemon、systemd unit 和 `/etc/default/tailscaled`
+- 新 `tailscaled` 无法启动时自动恢复原二进制、配置、enable 状态和运行状态
+- 如果检测到 apt/vendor 的 `tailscaled.service`，优先继续复用，不再无条件创建 systemd override
+- Headplane 的 pnpm 固定安装到 `/usr/local`，避免自定义 npm prefix 导致脚本安装成功但找不到 pnpm
+- 保留 v2.1.0 的本地包优先、多线路下载、SHA256 校验和大陆 VPS 安装增强
 
 ### 连接顺序
 
@@ -86,5 +82,5 @@ headscale tailscale derp peer-relay vpn self-hosted linux bash nginx china vps
 ## 博客 / 视频配套简介
 
 ```text
-Headscale One Click v2.1 在 v2.0 的 Headscale 0.29、官方 DERP 与 Peer Relay 基础上，重点加强中国大陆 VPS 安装：Tailscale 和 Node.js 支持本地包优先、多线路下载与 SHA256 校验，减少单一国外安装源失败导致的一键部署中断。
+Headscale One Click v2.1.1 在 v2.1.0 的大陆 VPS 下载增强基础上，新增 Tailscale 静态升级失败自动回滚、apt/vendor systemd unit 复用，以及 pnpm 固定安装路径，降低升级现有服务器时的风险。
 ```

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-SCRIPT_VERSION="2.1.0"
+SCRIPT_VERSION="2.1.1"
 WORKDIR="/usr/local/src/headscale-one-click"
 DERP_DIR="/etc/derp"
 DERP_SERVICE="/etc/systemd/system/derp.service"
@@ -603,6 +603,14 @@ install_tailscale_static() {
   local actual=""
   local staging="${WORKDIR}/tailscale-static-${version}-${ARCH}"
   local extracted="${staging}/tailscale_${version}_${ARCH}"
+  local backup_dir="${WORKDIR}/tailscale-backup-$(date +%s)"
+  local had_cli=0
+  local had_daemon=0
+  local had_unit=0
+  local had_defaults=0
+  local was_active=0
+  local was_enabled=0
+  local has_vendor_unit=0
   local -a urls=()
 
   mapfile -t urls < <(tailscale_download_urls "$filename")
@@ -631,19 +639,63 @@ install_tailscale_static() {
     return 1
   }
 
-  systemctl stop tailscaled 2>/dev/null || true
-  install -m 0755 "${extracted}/tailscale" /usr/bin/tailscale
-  install -m 0755 "${extracted}/tailscaled" /usr/sbin/tailscaled
-  mkdir -p /etc/default /etc/systemd/system
-  if [[ ! -f /etc/default/tailscaled ]]; then
-    install -m 0644 "${extracted}/systemd/tailscaled.defaults" /etc/default/tailscaled
+  mkdir -p "$backup_dir"
+  if [[ -e /usr/bin/tailscale || -L /usr/bin/tailscale ]]; then
+    cp -a /usr/bin/tailscale "$backup_dir/usr-bin-tailscale"
+    had_cli=1
   fi
-  install -m 0644 "${extracted}/systemd/tailscaled.service" /etc/systemd/system/tailscaled.service
-  systemctl daemon-reload
-  if ! systemctl enable --now tailscaled || ! systemctl is-active --quiet tailscaled; then
-    warn "Tailscale 静态包已写入，但 tailscaled 服务未能正常启动。"
+  if [[ -e /usr/sbin/tailscaled || -L /usr/sbin/tailscaled ]]; then
+    cp -a /usr/sbin/tailscaled "$backup_dir/usr-sbin-tailscaled"
+    had_daemon=1
+  fi
+  if [[ -e /etc/systemd/system/tailscaled.service || -L /etc/systemd/system/tailscaled.service ]]; then
+    cp -a /etc/systemd/system/tailscaled.service "$backup_dir/tailscaled.service"
+    had_unit=1
+  fi
+  if [[ -e /etc/default/tailscaled || -L /etc/default/tailscaled ]]; then
+    cp -a /etc/default/tailscaled "$backup_dir/tailscaled.defaults"
+    had_defaults=1
+  fi
+  systemctl is-active --quiet tailscaled 2>/dev/null && was_active=1 || true
+  systemctl is-enabled --quiet tailscaled 2>/dev/null && was_enabled=1 || true
+  if [[ -f /lib/systemd/system/tailscaled.service || -f /usr/lib/systemd/system/tailscaled.service ]]; then
+    has_vendor_unit=1
+  fi
+
+  if ! {
+    systemctl stop tailscaled 2>/dev/null || true
+    install -m 0755 "${extracted}/tailscale" /usr/bin/tailscale &&
+    install -m 0755 "${extracted}/tailscaled" /usr/sbin/tailscaled &&
+    mkdir -p /etc/default /etc/systemd/system &&
+    { [[ -f /etc/default/tailscaled ]] || install -m 0644 "${extracted}/systemd/tailscaled.defaults" /etc/default/tailscaled; } &&
+    { [[ "$has_vendor_unit" -eq 1 && "$had_unit" -eq 0 ]] || install -m 0644 "${extracted}/systemd/tailscaled.service" /etc/systemd/system/tailscaled.service; } &&
+    systemctl daemon-reload &&
+    systemctl enable --now tailscaled &&
+    systemctl is-active --quiet tailscaled;
+  }; then
+    warn "Tailscale 静态包安装/启动失败，正在恢复安装前状态..."
+    systemctl stop tailscaled 2>/dev/null || true
+    rm -f /usr/bin/tailscale /usr/sbin/tailscaled /etc/systemd/system/tailscaled.service
+    [[ "$had_cli" -eq 1 ]] && cp -a "$backup_dir/usr-bin-tailscale" /usr/bin/tailscale
+    [[ "$had_daemon" -eq 1 ]] && cp -a "$backup_dir/usr-sbin-tailscaled" /usr/sbin/tailscaled
+    [[ "$had_unit" -eq 1 ]] && cp -a "$backup_dir/tailscaled.service" /etc/systemd/system/tailscaled.service
+    if [[ "$had_defaults" -eq 1 ]]; then
+      cp -a "$backup_dir/tailscaled.defaults" /etc/default/tailscaled
+    else
+      rm -f /etc/default/tailscaled
+    fi
+    systemctl daemon-reload || true
+    if [[ "$was_enabled" -eq 1 ]]; then
+      systemctl enable tailscaled 2>/dev/null || true
+    else
+      systemctl disable tailscaled 2>/dev/null || true
+    fi
+    [[ "$was_active" -eq 1 ]] && systemctl start tailscaled 2>/dev/null || true
+    rm -rf "$backup_dir"
     return 1
   fi
+
+  rm -rf "$backup_dir"
   return 0
 }
 
@@ -893,13 +945,11 @@ install_headplane_runtime() {
       info "检测到兼容的 pnpm ${pnpm_version}，跳过安装 pnpm。"
     else
       info "检测到 pnpm ${pnpm_version}，但版本过低，升级到 10.4.0 ..."
-      npm config set registry https://registry.npmmirror.com
-      npm install -g pnpm@10.4.0
+      npm --registry=https://registry.npmmirror.com install -g --prefix /usr/local pnpm@10.4.0
     fi
   else
     info "安装 pnpm 10.4.0 ..."
-    npm config set registry https://registry.npmmirror.com
-    npm install -g pnpm@10.4.0
+    npm --registry=https://registry.npmmirror.com install -g --prefix /usr/local pnpm@10.4.0
   fi
 
   command_exists node || die "Node.js 安装失败。"

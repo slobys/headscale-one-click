@@ -45,6 +45,8 @@ v2.1.0 开始，Tailscale 客户端不再只依赖 `https://tailscale.com/instal
 - 没有本地文件时，直接下载 `pkgs.tailscale.com` 官方静态包
 - 安装前强制校验 SHA256；校验失败不会执行二进制
 - 静态包线路失败后，才最后尝试官方 `install.sh`
+- 如果静态升级后 `tailscaled` 启动失败，会自动恢复原来的 Tailscale 二进制、配置和服务状态
+- 如果服务器原本通过 apt 安装 Tailscale，会优先复用 vendor systemd unit，避免长期覆盖包管理器的 unit
 
 例如默认 amd64 服务器可提前准备：
 
@@ -55,7 +57,7 @@ tailscale_1.102.4_amd64.tgz.sha256
 
 上传到 `/root/` 后重新执行脚本即可。也可以通过 `TAILSCALE_DOWNLOAD_BASE` 指定自己的可信镜像目录。
 
-如果选择 Headplane，Node.js 也改为二进制包优先：脚本会尝试国内 `npmmirror` 和 Node.js 官方源，并校验 SHA256；二进制线路全部失败时才使用 NodeSource。网络受限环境可把 `node-v22.23.2-linux-x64.tar.xz`（arm64 对应 `linux-arm64`）及其 `.sha256` 文件上传到 `/root/`，也可以通过 `NODE_DOWNLOAD_BASE` 指定自己的可信 Node.js 镜像根目录。
+如果选择 Headplane，Node.js 也改为二进制包优先：脚本会尝试国内 `npmmirror` 和 Node.js 官方源，并校验 SHA256；二进制线路全部失败时才使用 NodeSource。网络受限环境可把 `node-v22.23.2-linux-x64.tar.xz`（arm64 对应 `linux-arm64`）及其 `.sha256` 文件上传到 `/root/`，也可以通过 `NODE_DOWNLOAD_BASE` 指定自己的可信 Node.js 镜像根目录。pnpm 会固定安装到 `/usr/local`，避免受 root 用户自定义 npm prefix 影响。
 
 ## 适用环境
 

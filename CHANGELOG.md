@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v2.1.1 - 2026-09-23
+
+### Changed
+- Tailscale 静态包安装前保存已有 CLI、daemon、systemd unit 和 defaults；新服务启动失败时自动恢复安装前状态
+- 检测到 apt/vendor 提供的 `tailscaled.service` 时优先复用，不再无条件写入 `/etc/systemd/system/` 覆盖 vendor unit
+- Headplane 的 pnpm 明确安装到 `/usr/local`，避免 root 用户自定义 npm prefix 后出现 `pnpm` 不在 PATH 的问题
+
 ## v2.1.0 - 2026-09-22
 
 ### Added
