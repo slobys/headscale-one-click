@@ -37,6 +37,26 @@ curl -L --connect-timeout 15 https://cdn.jsdelivr.net/gh/slobys/headscale-one-cl
 GITHUB_PROXY_PREFIX=https://ghfast.top bash /tmp/hs-bootstrap.sh
 ```
 
+## 中国大陆 VPS 下载策略
+
+v2.1.0 开始，Tailscale 客户端不再只依赖 `https://tailscale.com/install.sh`：
+
+- 优先检查 `/root/` 和当前目录中的 Tailscale 官方静态包
+- 没有本地文件时，直接下载 `pkgs.tailscale.com` 官方静态包
+- 安装前强制校验 SHA256；校验失败不会执行二进制
+- 静态包线路失败后，才最后尝试官方 `install.sh`
+
+例如默认 amd64 服务器可提前准备：
+
+```text
+tailscale_1.102.4_amd64.tgz
+tailscale_1.102.4_amd64.tgz.sha256
+```
+
+上传到 `/root/` 后重新执行脚本即可。也可以通过 `TAILSCALE_DOWNLOAD_BASE` 指定自己的可信镜像目录。
+
+如果选择 Headplane，Node.js 也改为二进制包优先：脚本会尝试国内 `npmmirror` 和 Node.js 官方源，并校验 SHA256；二进制线路全部失败时才使用 NodeSource。网络受限环境可把 `node-v22.23.2-linux-x64.tar.xz`（arm64 对应 `linux-arm64`）及其 `.sha256` 文件上传到 `/root/`，也可以通过 `NODE_DOWNLOAD_BASE` 指定自己的可信 Node.js 镜像根目录。
+
 ## 适用环境
 
 - Debian 12+ / Ubuntu 22.04+
@@ -102,6 +122,8 @@ http://1.2.3.4:8080/web
 - Headscale-ui 或 Headplane 版本，默认使用上游最新版本，可手动输入旧版本
 
 一般情况下直接回车使用默认值即可。
+
+Tailscale 客户端默认与所选 DERP/Tailscale 版本保持一致；如果服务器上已经安装了相同或更新版本，则直接复用。
 
 系统升级会执行 `apt upgrade -y`。新服务器可以执行；已经跑业务的服务器建议先跳过。
 

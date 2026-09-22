@@ -43,6 +43,13 @@ fetch_latest_headplane() {
   curl_quick https://api.github.com/repos/tale/headplane/releases/latest | grep '"tag_name"' | head -n 1 | sed -E 's/.*"v?([^"]+)".*/\1/'
 }
 
+fetch_latest_node22() {
+  curl_quick https://nodejs.org/dist/latest-v22.x/SHASUMS256.txt \
+    | grep -oE 'node-v22\.[0-9]+\.[0-9]+-linux-x64\.tar\.xz' \
+    | head -n 1 \
+    | sed -E 's/^node-v([0-9.]+)-.*/\1/'
+}
+
 main() {
   require_cmd curl
   require_cmd sed
@@ -55,12 +62,14 @@ main() {
   local headscale_version="unknown"
   local headscale_ui_version="unknown"
   local headplane_version="unknown"
+  local node22_version="unknown"
 
   go_version="$(fetch_latest_go 2>/dev/null || echo unknown)"
   tailscale_version="$(fetch_latest_tailscale 2>/dev/null || echo unknown)"
   headscale_version="$(fetch_latest_headscale 2>/dev/null || echo unknown)"
   headscale_ui_version="$(fetch_latest_headscale_ui 2>/dev/null || echo unknown)"
   headplane_version="$(fetch_latest_headplane 2>/dev/null || echo unknown)"
+  node22_version="$(fetch_latest_node22 2>/dev/null || echo unknown)"
 
   echo
   echo "当前建议关注的上游最新版本："
@@ -69,6 +78,7 @@ main() {
   echo "- Headscale:       ${headscale_version}"
   echo "- Headscale-ui:    ${headscale_ui_version}"
   echo "- Headplane:       ${headplane_version}"
+  echo "- Node.js 22:      ${node22_version}"
   echo
 
   warn "安装和更新流程默认会使用查询到的最新版。"

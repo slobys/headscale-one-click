@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-SCRIPT_VERSION="2.0.0"
+SCRIPT_VERSION="2.1.0"
 WORKDIR="/usr/local/src/headscale-one-click"
 DERP_DIR="/etc/derp"
 DERP_SERVICE="/etc/systemd/system/derp.service"
@@ -17,6 +17,7 @@ TAILSCALE_FALLBACK_VERSION="1.102.4"
 HEADSCALE_FALLBACK_VERSION="0.29.3"
 HEADSCALE_UI_FALLBACK_VERSION="2026.03.17"
 HEADPLANE_FALLBACK_VERSION="0.7.1"
+NODE_FALLBACK_VERSION="22.23.2"
 HEADSCALE_UI_VERSION="${HEADSCALE_UI_FALLBACK_VERSION}"
 PANEL_STATE_DIR="/etc/headscale-one-click"
 PANEL_STATE_FILE="${PANEL_STATE_DIR}/panel.env"
@@ -26,6 +27,7 @@ HEADPLANE_CONFIG="${HEADPLANE_CONFIG_DIR}/config.yaml"
 HEADPLANE_SERVICE="/etc/systemd/system/headplane.service"
 HEADPLANE_DATA_DIR="/var/lib/headplane"
 HEADPLANE_PORT="3000"
+HEADPLANE_NODE_BIN="/usr/bin/node"
 
 RED=$'\033[0;31m'
 GREEN=$'\033[0;32m'
@@ -112,6 +114,13 @@ fetch_latest_headscale_ui() {
 
 fetch_latest_headplane() {
   curl_quick https://api.github.com/repos/tale/headplane/releases/latest | grep '"tag_name"' | head -n 1 | sed -E 's/.*"v?([^"]+)".*/\1/'
+}
+
+fetch_latest_node22() {
+  curl_quick https://nodejs.org/dist/latest-v22.x/SHASUMS256.txt \
+    | grep -oE 'node-v22\.[0-9]+\.[0-9]+-linux-x64\.tar\.xz' \
+    | head -n 1 \
+    | sed -E 's/^node-v([0-9.]+)-.*/\1/'
 }
 
 detect_latest_versions() {
@@ -274,7 +283,7 @@ install_base_packages() {
   info "更新软件源并安装基础依赖..."
   apt update
   ask_system_upgrade
-  DEBIAN_FRONTEND=noninteractive apt install -y wget git openssl curl unzip nginx ca-certificates tar
+  DEBIAN_FRONTEND=noninteractive apt install -y wget git openssl curl unzip nginx ca-certificates tar xz-utils
 }
 
 prepare_workdir() {
@@ -361,6 +370,152 @@ github_download_urls() {
     "$source_url"
 }
 
+tailscale_download_urls() {
+  local filename="$1"
+  local custom_base="${TAILSCALE_DOWNLOAD_BASE:-}"
+
+  if [[ -n "$custom_base" ]]; then
+    printf '%s\n' "${custom_base%/}/${filename}"
+  fi
+  printf '%s\n' "https://pkgs.tailscale.com/stable/${filename}"
+}
+
+tailscale_expected_sha256() {
+  local version="$1"
+  local arch="$2"
+  local filename="$3"
+  local candidate=""
+  local value=""
+  local custom_base="${TAILSCALE_DOWNLOAD_BASE:-}"
+
+  case "${version}:${arch}" in
+    1.102.4:amd64)
+      printf '%s\n' "50748df1045e60b5b695f19f4c56b0da36c019948b440fb456b6584a50f0d8b9"
+      return 0
+      ;;
+    1.102.4:arm64)
+      printf '%s\n' "9dd1e6a592a014bbaea0103167ffe299adeda4ba14e078ce9c2895364f6c4c3f"
+      return 0
+      ;;
+  esac
+
+  for candidate in "/root/${filename}.sha256" "./${filename}.sha256"; do
+    if [[ -f "$candidate" ]]; then
+      value="$(grep -oE '[0-9a-fA-F]{64}' "$candidate" | head -n 1 | tr 'A-F' 'a-f')"
+      [[ "$value" =~ ^[0-9a-f]{64}$ ]] && {
+        printf '%s\n' "$value"
+        return 0
+      }
+    fi
+  done
+
+  value="$(curl_quick "https://pkgs.tailscale.com/stable/${filename}.sha256" 2>/dev/null | grep -oE '[0-9a-fA-F]{64}' | head -n 1 | tr 'A-F' 'a-f' || true)"
+  if [[ "$value" =~ ^[0-9a-f]{64}$ ]]; then
+    printf '%s\n' "$value"
+    return 0
+  fi
+
+  if [[ -n "$custom_base" ]]; then
+    value="$(curl_quick "${custom_base%/}/${filename}.sha256" 2>/dev/null | grep -oE '[0-9a-fA-F]{64}' | head -n 1 | tr 'A-F' 'a-f' || true)"
+    if [[ "$value" =~ ^[0-9a-f]{64}$ ]]; then
+      warn "Tailscale 校验值来自自定义下载源，请确认该镜像可信。" >&2
+      printf '%s\n' "$value"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+node_download_arch() {
+  case "$ARCH" in
+    amd64) printf '%s\n' "x64" ;;
+    arm64) printf '%s\n' "arm64" ;;
+    *) return 1 ;;
+  esac
+}
+
+node_download_urls() {
+  local version="$1"
+  local filename="$2"
+  local custom_base="${NODE_DOWNLOAD_BASE:-}"
+
+  if [[ -n "$custom_base" ]]; then
+    printf '%s\n' "${custom_base%/}/v${version}/${filename}"
+  fi
+  printf '%s\n' \
+    "https://registry.npmmirror.com/-/binary/node/v${version}/${filename}" \
+    "https://nodejs.org/dist/v${version}/${filename}"
+}
+
+node_expected_sha256() {
+  local version="$1"
+  local filename="$2"
+  local node_arch="$3"
+  local candidate=""
+  local value=""
+  local shasums=""
+  local custom_base="${NODE_DOWNLOAD_BASE:-}"
+
+  case "${version}:${node_arch}" in
+    22.23.2:x64)
+      printf '%s\n' "d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307"
+      return 0
+      ;;
+    22.23.2:arm64)
+      printf '%s\n' "fff4078c5def658577f92c88db7db3bc0072924bfb93fe52c1e744a54e94abb8"
+      return 0
+      ;;
+  esac
+
+  for candidate in "/root/${filename}.sha256" "./${filename}.sha256"; do
+    if [[ -f "$candidate" ]]; then
+      value="$(grep -oE '[0-9a-fA-F]{64}' "$candidate" | head -n 1 | tr 'A-F' 'a-f')"
+      [[ "$value" =~ ^[0-9a-f]{64}$ ]] && {
+        printf '%s\n' "$value"
+        return 0
+      }
+    fi
+  done
+
+  for candidate in /root/SHASUMS256.txt ./SHASUMS256.txt; do
+    if [[ -f "$candidate" ]]; then
+      value="$(awk -v f="$filename" '$2 == f {print $1; exit}' "$candidate" | tr 'A-F' 'a-f')"
+      [[ "$value" =~ ^[0-9a-f]{64}$ ]] && {
+        printf '%s\n' "$value"
+        return 0
+      }
+    fi
+  done
+
+  shasums="$(curl_quick "https://nodejs.org/dist/v${version}/SHASUMS256.txt" 2>/dev/null || true)"
+  value="$(printf '%s\n' "$shasums" | awk -v f="$filename" '$2 == f {print $1; exit}' | tr 'A-F' 'a-f')"
+  if [[ "$value" =~ ^[0-9a-f]{64}$ ]]; then
+    printf '%s\n' "$value"
+    return 0
+  fi
+
+  shasums="$(curl_quick "https://registry.npmmirror.com/-/binary/node/v${version}/SHASUMS256.txt" 2>/dev/null || true)"
+  value="$(printf '%s\n' "$shasums" | awk -v f="$filename" '$2 == f {print $1; exit}' | tr 'A-F' 'a-f')"
+  if [[ "$value" =~ ^[0-9a-f]{64}$ ]]; then
+    warn "Node.js 校验值来自 npmmirror；官方校验文件当前不可达。" >&2
+    printf '%s\n' "$value"
+    return 0
+  fi
+
+  if [[ -n "$custom_base" ]]; then
+    shasums="$(curl_quick "${custom_base%/}/v${version}/SHASUMS256.txt" 2>/dev/null || true)"
+    value="$(printf '%s\n' "$shasums" | awk -v f="$filename" '$2 == f {print $1; exit}' | tr 'A-F' 'a-f')"
+    if [[ "$value" =~ ^[0-9a-f]{64}$ ]]; then
+      warn "Node.js 校验值来自自定义下载源，请确认该镜像可信。" >&2
+      printf '%s\n' "$value"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
 install_go() {
   local go_version="$1"
   local go_file="go${go_version}.linux-${GO_ARCH}.tar.gz"
@@ -440,20 +595,101 @@ EOF
   success "DERP 安装完成。"
 }
 
-install_tailscale() {
-  info "安装 Tailscale 客户端..."
-  if ! curl -fsSL https://tailscale.com/install.sh | sh; then
-    cat <<EOF
-${YELLOW}[WARN]${NC} Tailscale 客户端自动安装失败。
-这通常是因为当前中国大陆服务器环境无法稳定访问 tailscale.com。
+install_tailscale_static() {
+  local version="$1"
+  local filename="tailscale_${version}_${ARCH}.tgz"
+  local archive="${WORKDIR}/${filename}"
+  local expected=""
+  local actual=""
+  local staging="${WORKDIR}/tailscale-static-${version}-${ARCH}"
+  local extracted="${staging}/tailscale_${version}_${ARCH}"
+  local -a urls=()
 
-可先手动安装 Tailscale 客户端，然后再重新运行本脚本后续步骤。
-官方安装说明：
-https://tailscale.com/download/linux
-EOF
+  mapfile -t urls < <(tailscale_download_urls "$filename")
+  find_or_download_file "$filename" "$archive" "${urls[@]}" || return 1
+
+  expected="$(tailscale_expected_sha256 "$version" "$ARCH" "$filename" || true)"
+  [[ "$expected" =~ ^[0-9a-f]{64}$ ]] || {
+    warn "无法取得 ${filename} 的可信 SHA256；为避免执行未校验二进制，已停止静态安装。"
+    return 1
+  }
+  actual="$(sha256sum "$archive" | awk '{print $1}')"
+  [[ "$actual" == "$expected" ]] || {
+    warn "Tailscale 静态包 SHA256 不匹配：${filename}"
+    return 1
+  }
+
+  rm -rf "$staging"
+  mkdir -p "$staging"
+  tar -xzf "$archive" -C "$staging"
+  [[ -x "${extracted}/tailscale" && -x "${extracted}/tailscaled" ]] || {
+    warn "Tailscale 静态包目录结构不符合预期。"
+    return 1
+  }
+  [[ -f "${extracted}/systemd/tailscaled.service" && -f "${extracted}/systemd/tailscaled.defaults" ]] || {
+    warn "Tailscale 静态包缺少 systemd 文件。"
+    return 1
+  }
+
+  systemctl stop tailscaled 2>/dev/null || true
+  install -m 0755 "${extracted}/tailscale" /usr/bin/tailscale
+  install -m 0755 "${extracted}/tailscaled" /usr/sbin/tailscaled
+  mkdir -p /etc/default /etc/systemd/system
+  if [[ ! -f /etc/default/tailscaled ]]; then
+    install -m 0644 "${extracted}/systemd/tailscaled.defaults" /etc/default/tailscaled
+  fi
+  install -m 0644 "${extracted}/systemd/tailscaled.service" /etc/systemd/system/tailscaled.service
+  systemctl daemon-reload
+  if ! systemctl enable --now tailscaled || ! systemctl is-active --quiet tailscaled; then
+    warn "Tailscale 静态包已写入，但 tailscaled 服务未能正常启动。"
     return 1
   fi
-  success "Tailscale 客户端安装完成。"
+  return 0
+}
+
+install_tailscale() {
+  local target_version="$1"
+  local current_version=""
+
+  info "安装 Tailscale 客户端..."
+  if command_exists tailscale; then
+    current_version="$(tailscale version 2>/dev/null | head -n 1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1 || true)"
+    if [[ -n "$current_version" ]] && version_ge "$current_version" "$target_version"; then
+      if systemctl enable --now tailscaled 2>/dev/null && systemctl is-active --quiet tailscaled; then
+        info "检测到 Tailscale ${current_version} 且 tailscaled 运行正常，跳过安装。"
+        return 0
+      fi
+      warn "检测到 Tailscale ${current_version}，但 tailscaled 服务异常，将继续执行修复安装。"
+    fi
+  fi
+
+  info "优先使用可校验的 Tailscale 官方静态包（支持 /root 本地文件优先）..."
+  if install_tailscale_static "$target_version"; then
+    success "Tailscale 客户端静态包安装完成。"
+    return 0
+  fi
+
+  warn "Tailscale 静态包线路不可用，最后尝试官方 install.sh..."
+  if curl -fsSL --connect-timeout 15 --max-time 90 https://tailscale.com/install.sh | sh; then
+    if command_exists tailscale && systemctl enable --now tailscaled && systemctl is-active --quiet tailscaled; then
+      success "Tailscale 客户端通过官方 install.sh 安装完成。"
+      return 0
+    fi
+    warn "官方 install.sh 已执行，但 Tailscale 命令或 tailscaled 服务仍不正常。"
+  fi
+
+  cat <<EOF
+${RED}[ERROR]${NC} Tailscale 客户端安装失败。
+
+中国大陆服务器建议：
+1. 在其它网络下载 tailscale_${target_version}_${ARCH}.tgz
+2. 同时下载 tailscale_${target_version}_${ARCH}.tgz.sha256
+3. 上传到 /root/
+4. 重新执行安装
+
+也可以通过 TAILSCALE_DOWNLOAD_BASE 指定你自己的可信镜像目录。
+EOF
+  return 1
 }
 
 install_headscale() {
@@ -562,9 +798,65 @@ install_headscale_ui() {
   success "Headscale Web UI 部署完成。"
 }
 
+install_node_binary() {
+  local version="$1"
+  local node_arch=""
+  local filename=""
+  local archive=""
+  local expected=""
+  local actual=""
+  local staging=""
+  local extracted=""
+  local dest=""
+  local tool=""
+  local -a urls=()
+
+  node_arch="$(node_download_arch)" || return 1
+  filename="node-v${version}-linux-${node_arch}.tar.xz"
+  archive="${WORKDIR}/${filename}"
+  staging="${WORKDIR}/node-static-${version}-${node_arch}"
+  extracted="${staging}/node-v${version}-linux-${node_arch}"
+  dest="/usr/local/lib/nodejs/node-v${version}-linux-${node_arch}"
+
+  mapfile -t urls < <(node_download_urls "$version" "$filename")
+  find_or_download_file "$filename" "$archive" "${urls[@]}" || return 1
+
+  expected="$(node_expected_sha256 "$version" "$filename" "$node_arch" || true)"
+  [[ "$expected" =~ ^[0-9a-f]{64}$ ]] || {
+    warn "无法取得 ${filename} 的可信 SHA256；为避免执行未校验二进制，已停止 Node.js 二进制安装。"
+    return 1
+  }
+  actual="$(sha256sum "$archive" | awk '{print $1}')"
+  [[ "$actual" == "$expected" ]] || {
+    warn "Node.js 二进制包 SHA256 不匹配：${filename}"
+    return 1
+  }
+
+  rm -rf "$staging"
+  mkdir -p "$staging"
+  tar -xJf "$archive" -C "$staging"
+  [[ -x "${extracted}/bin/node" ]] || {
+    warn "Node.js 二进制包目录结构不符合预期。"
+    return 1
+  }
+
+  mkdir -p /usr/local/lib/nodejs /usr/local/bin
+  rm -rf "$dest"
+  mv "$extracted" "$dest"
+  for tool in node npm npx corepack; do
+    if [[ -e "${dest}/bin/${tool}" ]]; then
+      ln -sfn "${dest}/bin/${tool}" "/usr/local/bin/${tool}"
+    fi
+  done
+  export PATH="/usr/local/bin:${PATH}"
+  hash -r
+  return 0
+}
+
 install_headplane_runtime() {
   local node_version=""
   local node_major=""
+  local node_target_version=""
   local pnpm_version=""
 
   if command_exists node; then
@@ -575,16 +867,25 @@ install_headplane_runtime() {
   if [[ -n "$node_major" && "$node_major" -eq 22 ]] && version_ge "$node_version" "22.18.0"; then
     info "检测到兼容的 Node.js v${node_version}，跳过安装 Node.js。"
   else
-    info "安装 Headplane 所需 Node.js 22（要求 >=22.18 且 <23）..."
-    apt update
-    DEBIAN_FRONTEND=noninteractive apt install -y gnupg build-essential
-    curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-    DEBIAN_FRONTEND=noninteractive apt install -y nodejs
+    node_target_version="$(fetch_latest_node22 2>/dev/null || echo "$NODE_FALLBACK_VERSION")"
+    [[ -n "$node_target_version" ]] || node_target_version="$NODE_FALLBACK_VERSION"
+    info "安装 Headplane 所需 Node.js 22（目标 v${node_target_version}，要求 >=22.18 且 <23）..."
+
+    if ! install_node_binary "$node_target_version"; then
+      warn "Node.js 二进制包线路不可用，最后尝试 NodeSource..."
+      apt update
+      DEBIAN_FRONTEND=noninteractive apt install -y gnupg build-essential
+      curl -fsSL --connect-timeout 15 --max-time 90 https://deb.nodesource.com/setup_22.x | bash -
+      DEBIAN_FRONTEND=noninteractive apt install -y nodejs
+    fi
+    hash -r
     node_version="$(node -v | sed 's/^v//')"
     node_major="$(node -v | sed -E 's/^v([0-9]+).*/\1/')"
   fi
 
   [[ -n "$node_major" && "$node_major" -eq 22 ]] && version_ge "$node_version" "22.18.0" || die "当前 Node.js 版本不兼容 Headplane：v${node_version:-unknown}。请使用 22.18.x 到 22.x 最新稳定版。"
+  HEADPLANE_NODE_BIN="$(command -v node)"
+  [[ -x "$HEADPLANE_NODE_BIN" ]] || die "无法定位可执行的 Node.js。"
 
   if command_exists pnpm; then
     pnpm_version="$(pnpm -v)"
@@ -668,7 +969,7 @@ StartLimitIntervalSec=0
 Type=simple
 User=root
 WorkingDirectory=${HEADPLANE_DIR}
-ExecStart=/usr/bin/node ${HEADPLANE_DIR}/build/server/index.js
+ExecStart=${HEADPLANE_NODE_BIN} ${HEADPLANE_DIR}/build/server/index.js
 Restart=on-failure
 RestartSec=5s
 
@@ -942,7 +1243,7 @@ main() {
   install_base_packages
   install_go "$GO_VERSION"
   install_derp "$TAILSCALE_VERSION"
-  install_tailscale
+  install_tailscale "$TAILSCALE_VERSION"
   install_headscale "$HEADSCALE_VERSION"
   configure_headscale
   if [[ "$PANEL_TYPE" == "headplane" ]]; then

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## v2.1.0 - 2026-09-22
+
+### Added
+- Tailscale 客户端新增本地静态包优先、官方静态包下载和 SHA256 强制校验，支持 `TAILSCALE_DOWNLOAD_BASE` 自定义可信镜像
+- Headplane 的 Node.js 新增本地二进制包优先、npmmirror / nodejs.org 多线路下载和 SHA256 校验
+- 上游版本检查增加 Node.js 22 最新版本
+
+### Changed
+- Tailscale 安装不再只依赖 `tailscale.com/install.sh`，静态包失败后才使用该脚本作为最后兜底
+- Headplane Node.js 安装不再优先依赖 NodeSource，NodeSource 改为二进制包线路全部失败后的最后兜底
+- 基础依赖增加 `xz-utils`，用于解压 Node.js 官方 `.tar.xz` 二进制包
+
 ## v2.0.0 - 2026-09-22
 
 ### Added
