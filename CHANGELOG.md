@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## v2.0.0 - 2026-09-22
+
+### Added
+- 新增 `peer-relay.sh` 与“Peer Relay 管理”菜单，可配置 UDP 端口、静态公网端点、状态检查和验证命令
+- 新增 Headscale 0.29 Peer Relay Grant 辅助：根据本机 Tailscale IP 生成待合并片段，但始终不自动创建、修改或覆盖用户 policy
+- 新增 Headscale 升级前配置/数据库备份、minor 升级路径保护与启动前 `headscale configtest`
+
+### Changed
+- DERP 改为直接使用官方稳定版 `derper`，移除 `cert.go` 源码修改方案
+- DERP 自签证书改为 SHA256 指纹固定，使用本地 `/etc/headscale/derp.yaml`，移除 `InsecureForTests` 与 Nginx DERP Map 暴露
+- DERP 显式启用 STUN `3478/udp`，客户端校验从 `--verify-clients` 改为 Headscale `/verify` admission controller 且 fail-closed
+- Headscale fallback 更新为 `0.29.3`，Tailscale/derper fallback 更新为 `1.102.4`，Headplane fallback 更新为 `0.7.1`
+- Headscale 0.29 检测到旧 `randomize_client_port` 时先备份再停止升级，要求用户显式迁移到 policy `randomizeClientPort`；同时补充 localhost `trusted_proxies`
+- Headscale 0.28 -> 0.29 升级检测到已弃用的 `ephemeral_node_inactivity_timeout` 时只给出迁移提示，不自动重写用户配置
+- Headscale API Key 恢复使用上游默认有效期，不再自动创建 9999 天超长期 Key
+- 安装 Headscale 官方 DEB 时临时阻止包的 `postinst` 自动启动服务，解除后先 `configtest` 再启动
+- Nginx 删除仅用于旧 DERP JSON 的 localhost 80 端口与 `autoindex` 配置
+
+## v1.6.0 - 2026-09-22
+
 ### Added
 - 新增 `bootstrap.sh` 一条命令入口，自动拉取 / 更新项目、补齐执行权限、安装 `hs` 菜单快捷命令并启动安装
 - `README.md` 快速开始改为优先展示一条命令安装方式，同时保留手动 `git clone` 用法

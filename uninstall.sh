@@ -20,6 +20,9 @@ die() {
 [[ "${EUID}" -eq 0 ]] || die "请使用 root 用户运行卸载脚本。"
 
 PANEL_STATE_FILE="/etc/headscale-one-click/panel.env"
+PEER_RELAY_STATE_FILE="/etc/headscale-one-click/peer-relay.env"
+DERP_MAP="/etc/headscale/derp.yaml"
+GRANT_SNIPPET_FILE="/etc/headscale-one-click/peer-relay-grant.hujson"
 HEADPLANE_DIR="/opt/headplane"
 HEADPLANE_CONFIG_DIR="/etc/headplane"
 HEADPLANE_DATA_DIR="/var/lib/headplane"
@@ -43,11 +46,13 @@ cat <<EOF
 - Headscale 服务
 - 当前已安装的管理面板文件
 - 当前脚本生成的 Nginx 独立站点配置
-- /var/www/derp.json
+- /etc/headscale/derp.yaml（脚本生成的自建 DERP Map）
+- Peer Relay 本地状态和 Grant 示例片段
 
 注意：
 - 不会自动删除 Tailscale 客户端
 - 不会自动删除 Go 环境
+- 不会删除或修改你自己的 Headscale policy
 - 不会自动清空你系统其它业务文件
 EOF
 
@@ -57,6 +62,11 @@ answer="${answer:-N}"
   warn "已取消卸载。"
   exit 0
 }
+
+if [[ -f "$PEER_RELAY_STATE_FILE" ]] && command -v tailscale >/dev/null 2>&1; then
+  info "关闭由本项目启用的 Peer Relay..."
+  tailscale set --relay-server-port="" --relay-server-static-endpoints="" 2>/dev/null || true
+fi
 
 info "停止并禁用服务..."
 systemctl stop derp 2>/dev/null || true
@@ -70,14 +80,16 @@ info "删除 DERP 服务文件与证书..."
 rm -f /etc/systemd/system/derp.service
 rm -rf /etc/derp
 
-info "删除面板文件与 DERP JSON..."
+info "删除面板文件与自建 DERP Map..."
 rm -rf /var/www/web
-rm -f /var/www/derp.json
+rm -f "$DERP_MAP"
 rm -rf "$HEADPLANE_DIR"
 rm -rf "$HEADPLANE_CONFIG_DIR"
 rm -rf "$HEADPLANE_DATA_DIR"
 rm -f "$HEADPLANE_SERVICE"
 rm -f "$PANEL_STATE_FILE"
+rm -f "$PEER_RELAY_STATE_FILE"
+rm -f "$GRANT_SNIPPET_FILE"
 
 info "删除脚本生成的 Nginx 配置..."
 rm -f /etc/nginx/sites-enabled/headscale-one-click.conf

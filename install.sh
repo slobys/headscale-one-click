@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-SCRIPT_VERSION="1.5.6"
+SCRIPT_VERSION="2.0.0"
 WORKDIR="/usr/local/src/headscale-one-click"
 DERP_DIR="/etc/derp"
 DERP_SERVICE="/etc/systemd/system/derp.service"
+DERP_MAP="/etc/headscale/derp.yaml"
 NGINX_SITE_NAME="headscale-one-click"
 NGINX_AVAILABLE="/etc/nginx/sites-available/${NGINX_SITE_NAME}.conf"
 NGINX_ENABLED="/etc/nginx/sites-enabled/${NGINX_SITE_NAME}.conf"
@@ -12,12 +13,11 @@ HEADSCALE_CONFIG="/etc/headscale/config.yaml"
 HEADSCALE_UI_DIR="/var/www/web"
 HEADSCALE_INTERNAL_PORT="18080"
 GO_FALLBACK_VERSION="1.26.3"
-TAILSCALE_FALLBACK_VERSION="1.98.3"
-HEADSCALE_FALLBACK_VERSION="0.28.0"
+TAILSCALE_FALLBACK_VERSION="1.102.4"
+HEADSCALE_FALLBACK_VERSION="0.29.3"
 HEADSCALE_UI_FALLBACK_VERSION="2026.03.17"
-HEADPLANE_FALLBACK_VERSION="0.6.3"
+HEADPLANE_FALLBACK_VERSION="0.7.1"
 HEADSCALE_UI_VERSION="${HEADSCALE_UI_FALLBACK_VERSION}"
-DERP_JSON="/var/www/derp.json"
 PANEL_STATE_DIR="/etc/headscale-one-click"
 PANEL_STATE_FILE="${PANEL_STATE_DIR}/panel.env"
 HEADPLANE_DIR="/opt/headplane"
@@ -156,7 +156,33 @@ validate_port() {
 
 validate_ipv4() {
   local ip="$1"
-  [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]
+  local IFS='.'
+  local -a octets=()
+  [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+  read -r -a octets <<< "$ip"
+  [[ "${#octets[@]}" -eq 4 ]] || return 1
+  local octet
+  for octet in "${octets[@]}"; do
+    (( 10#$octet >= 0 && 10#$octet <= 255 )) || return 1
+  done
+}
+
+validate_hostname_or_ipv4() {
+  local host="$1"
+  local label=""
+  local IFS='.'
+  local -a labels=()
+
+  validate_ipv4 "$host" && return 0
+  [[ -n "$host" && "${#host}" -le 253 ]] || return 1
+  [[ "$host" != *".."* ]] || return 1
+  [[ "$host" =~ ^[A-Za-z0-9.-]+$ ]] || return 1
+  read -r -a labels <<< "$host"
+  [[ "${#labels[@]}" -ge 1 ]] || return 1
+  for label in "${labels[@]}"; do
+    [[ -n "$label" && "${#label}" -le 63 ]] || return 1
+    [[ "$label" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]] || return 1
+  done
 }
 
 detect_public_ip() {
@@ -202,6 +228,14 @@ check_system() {
   # shellcheck disable=SC1091
   source /etc/os-release
   [[ "${ID:-}" == "debian" || "${ID:-}" == "ubuntu" ]] || die "当前版本先只支持 Debian / Ubuntu 系。"
+  case "${ID}" in
+    debian)
+      (( ${VERSION_ID%%.*} >= 12 )) || die "Headscale 官方 DEB 需要 Debian 12 或更新版本。"
+      ;;
+    ubuntu)
+      version_ge "${VERSION_ID}" "22.04" || die "Headscale 官方 DEB 需要 Ubuntu 22.04 或更新版本。"
+      ;;
+  esac
 }
 
 show_firewall_notice() {
@@ -213,6 +247,7 @@ ${YELLOW}========== 重要提醒 ==========${NC}
 请手动确认以下端口已经放行：
 - DERP 端口: ${DERP_PORT}
 - DERP HTTP 端口: ${HTTP_PORT}
+- STUN 端口: 3478/udp
 - Headscale 端口: ${HEADSCALE_PORT}
 - 如果已有反代/HTTPS，还要放行 80 / 443
 ${YELLOW}==============================${NC}
@@ -252,6 +287,9 @@ save_panel_state() {
   cat > "$PANEL_STATE_FILE" <<EOF
 PANEL_TYPE=${PANEL_TYPE}
 PANEL_PATH=${PANEL_PATH}
+SERVER_IP=${SERVER_IP}
+HEADSCALE_PORT=${HEADSCALE_PORT}
+HEADSCALE_INTERNAL_PORT=${HEADSCALE_INTERNAL_PORT}
 EOF
 }
 
@@ -350,8 +388,8 @@ install_go() {
 install_derp() {
   local tailscale_version="$1"
   local gopath=""
-  local cert_go_path=""
-  local tailscale_module_dir=""
+  local derper_bin=""
+  local san_type="DNS"
 
   info "开始安装 DERP 服务（Tailscale ${tailscale_version}）..."
   export PATH="$PATH:/usr/local/go/bin"
@@ -359,32 +397,25 @@ install_derp() {
   go install "tailscale.com/cmd/derper@v${tailscale_version}"
 
   gopath="$(go env GOPATH)"
-  tailscale_module_dir="${gopath}/pkg/mod/tailscale.com@v${tailscale_version}"
-  cert_go_path="${tailscale_module_dir}/cmd/derper/cert.go"
+  mkdir -p "$DERP_DIR"
+  derper_bin="${gopath}/bin/derper"
+  [[ -x "$derper_bin" ]] || die "derper 编译完成后未找到可执行文件：${derper_bin}"
+  install -m 0755 "$derper_bin" "$DERP_DIR/derper"
+  [[ -x "$DERP_DIR/derper" ]] || die "derper 编译失败，未生成可执行文件。"
 
-  if [[ ! -f "$cert_go_path" ]]; then
-    cert_go_path="$(find "$tailscale_module_dir" -type f -path '*/cmd/derper/cert.go' 2>/dev/null | head -n 1)"
+  if validate_ipv4 "$DOMAIN"; then
+    san_type="IP"
   fi
 
-  [[ -f "$cert_go_path" ]] || die "未找到 cert.go，无法继续处理 derper 源码。"
-
-  info "检测到 derper cert.go: ${cert_go_path}"
-  grep -q 'if hi.ServerName != m.hostname' "$cert_go_path" || die "cert.go 中未找到预期代码段，可能是上游源码结构发生变化。"
-  sed -i '/if hi.ServerName != m.hostname/,+2 s/^/\/\//' "$cert_go_path"
-  grep -q '//.*if hi.ServerName != m.hostname' "$cert_go_path" || die "DERP 源码修改未生效，请检查当前 derper 版本是否仍兼容此方案。"
-
-  pushd "$(dirname "$cert_go_path")" >/dev/null
-  mkdir -p "$DERP_DIR"
-  go build -o "$DERP_DIR/derper"
-  [[ -x "$DERP_DIR/derper" ]] || die "derper 编译失败，未生成可执行文件。"
-  popd >/dev/null
-
-  info "生成 DERP 自签名证书..."
+  info "生成 DERP 自签名证书（使用客户端证书指纹固定，不再修改 Tailscale 源码）..."
   openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes \
     -keyout "$DERP_DIR/${DOMAIN}.key" \
     -out "$DERP_DIR/${DOMAIN}.crt" \
     -subj "/CN=${DOMAIN}" \
-    -addext "subjectAltName=DNS:${DOMAIN}"
+    -addext "subjectAltName=${san_type}:${DOMAIN}"
+
+  DERP_CERT_HASH="$(openssl x509 -in "$DERP_DIR/${DOMAIN}.crt" -outform DER | sha256sum | awk '{print $1}')"
+  [[ "$DERP_CERT_HASH" =~ ^[0-9a-f]{64}$ ]] || die "DERP 证书 SHA256 指纹计算失败。"
 
   cat > "$DERP_SERVICE" <<EOF
 [Unit]
@@ -395,7 +426,7 @@ Wants=network.target
 [Service]
 User=root
 Restart=always
-ExecStart=${DERP_DIR}/derper -hostname ${DOMAIN} -a :${DERP_PORT} -http-port ${HTTP_PORT} -certmode manual -certdir ${DERP_DIR}
+ExecStart=${DERP_DIR}/derper -hostname ${DOMAIN} -a :${DERP_PORT} -http-port ${HTTP_PORT} -stun=true -stun-port 3478 -certmode manual -certdir ${DERP_DIR}
 RestartPreventExitStatus=1
 
 [Install]
@@ -427,20 +458,88 @@ EOF
 
 install_headscale() {
   local headscale_version="$1"
+  local current_version=""
+  local current_major=""
+  local current_minor=""
+  local target_major=""
+  local target_minor=""
+  local backup_root=""
+  local runtime_mask="/run/systemd/system/headscale.service"
+  local created_runtime_mask=0
   local deb_name="headscale_${headscale_version}_linux_${ARCH}.deb"
   local deb_url="https://github.com/juanfont/headscale/releases/download/v${headscale_version}/${deb_name}"
   local deb_file="${WORKDIR}/${deb_name}"
   local -a download_urls=()
 
+  target_major="${headscale_version%%.*}"
+  target_minor="$(cut -d. -f2 <<< "$headscale_version")"
+  if command_exists headscale; then
+    current_version="$(headscale version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1 || true)"
+  fi
+
+  if [[ -n "$current_version" ]]; then
+    current_major="${current_version%%.*}"
+    current_minor="$(cut -d. -f2 <<< "$current_version")"
+    [[ "$target_major" == "$current_major" ]] || die "检测到 Headscale ${current_version}，不能直接跨主版本升级到 ${headscale_version}。"
+    (( target_minor >= current_minor )) || die "Headscale 不支持从 ${current_version} 降级到 ${headscale_version}。"
+    (( target_minor <= current_minor + 1 )) || die "Headscale 要求逐个 minor 升级：当前 ${current_version}，目标 ${headscale_version}。请先升级到 0.$((current_minor + 1)).x 的最新补丁版。"
+
+    backup_root="/root/headscale-backup-$(date +%Y%m%d-%H%M%S)"
+    mkdir -p "$backup_root"
+    [[ -d /etc/headscale ]] && cp -a /etc/headscale "$backup_root/etc-headscale"
+    [[ -d /var/lib/headscale ]] && cp -a /var/lib/headscale "$backup_root/var-lib-headscale"
+    success "Headscale 升级前备份已保存：${backup_root}"
+
+    if (( target_minor >= 29 )) && [[ -f "$HEADSCALE_CONFIG" ]]; then
+      if grep -q '^randomize_client_port:' "$HEADSCALE_CONFIG"; then
+        die "检测到 Headscale 0.29 已删除的 randomize_client_port。0.29 会拒绝启动；请先把该设置迁移到 policy.path 指向的策略文件顶层 randomizeClientPort，再删除旧配置键后重试。备份已保存：${backup_root}"
+      fi
+
+      if grep -q '^ephemeral_node_inactivity_timeout:' "$HEADSCALE_CONFIG"; then
+        warn "检测到已弃用的 ephemeral_node_inactivity_timeout。Headscale 0.29 仍兼容该键，本脚本不会擅自改写；建议后续迁移到 node.ephemeral.inactivity_timeout。"
+      fi
+    fi
+    systemctl stop headscale 2>/dev/null || true
+  fi
+
   info "安装 Headscale ${headscale_version}..."
   mapfile -t download_urls < <(github_download_urls "$deb_url")
   find_or_download_file "$deb_name" "$deb_file" "${download_urls[@]}"
   mv -f "$deb_file" "${WORKDIR}/headscale.deb"
-  dpkg -i "${WORKDIR}/headscale.deb" || apt-get install -f -y
+
+  # Headscale 官方 DEB 的 postinst 会自动 start/restart 服务。
+  # 先做临时 runtime mask，确保数据库/配置备份完成后，由本脚本 configtest 通过再启动。
+  if [[ -d /run/systemd/system ]]; then
+    if systemctl is-enabled headscale.service 2>/dev/null | grep -qx 'masked'; then
+      die "headscale.service 当前已被管理员 mask。请先确认原因并手动 unmask 后再升级。"
+    fi
+    if [[ -e "$runtime_mask" || -L "$runtime_mask" ]]; then
+      die "检测到自定义 runtime unit：${runtime_mask}。为避免覆盖现有 systemd 设置，已停止安装。"
+    fi
+    ln -s /dev/null "$runtime_mask"
+    created_runtime_mask=1
+    systemctl daemon-reload
+  fi
+
+  # 保留已有 Headscale 配置，避免升级时 dpkg 因 conffile 交互而卡住或覆盖用户配置。
+  if ! dpkg --force-confold -i "${WORKDIR}/headscale.deb"; then
+    if ! DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::="--force-confold" install -f -y; then
+      if [[ "$created_runtime_mask" -eq 1 ]]; then
+        rm -f "$runtime_mask"
+        systemctl daemon-reload || true
+      fi
+      die "Headscale DEB 安装失败。"
+    fi
+  fi
+
+  if [[ "$created_runtime_mask" -eq 1 ]]; then
+    rm -f "$runtime_mask"
+    systemctl daemon-reload
+  fi
 
   systemctl enable headscale
-  systemctl restart headscale
-  success "Headscale 安装完成。"
+  systemctl stop headscale 2>/dev/null || true
+  success "Headscale 软件包安装完成，等待配置校验后启动。"
 }
 
 install_headscale_ui() {
@@ -630,21 +729,6 @@ EOF
  add_header Strict-Transport-Security "max-age=15552000; includeSubDomains" always;
  }
 }
-server {
- listen 80;
- listen [::]:80;
- server_name 127.0.0.1;
- root /var/www;
-
- index index.html index.htm index.nginx-debian.html;
- location /d {
- alias /var/www;
- autoindex on;
- }
- location / {
- try_files \$uri \$uri/ =404;
- }
-}
 EOF
   else
     cat >> "$NGINX_AVAILABLE" <<EOF
@@ -665,20 +749,6 @@ EOF
  alias /var/www/web;
  }
 }
-server {
- listen 80;
- listen [::]:80;
- server_name 127.0.0.1;
- root /var/www;
- index index.html index.htm index.nginx-debian.html;
- location /d {
- alias /var/www;
- autoindex on;
- }
- location / {
- try_files \$uri \$uri/ =404;
- }
-}
 EOF
   fi
 
@@ -693,46 +763,79 @@ EOF
 configure_headscale() {
   info "修改 Headscale 配置..."
   [[ -f "$HEADSCALE_CONFIG" ]] || die "未找到 ${HEADSCALE_CONFIG}，无法继续修改 Headscale 配置。"
+  [[ "${DERP_CERT_HASH:-}" =~ ^[0-9a-f]{64}$ ]] || die "DERP 证书指纹不存在，无法生成安全的 DERP Map。"
+  local custom_derp_urls=""
 
-  mkdir -p /var/www
   cp -f "$HEADSCALE_CONFIG" "${HEADSCALE_CONFIG}.bak.$(date +%s)"
 
   grep -q '^server_url:' "$HEADSCALE_CONFIG" || die "Headscale 配置中未找到 server_url 字段，当前版本配置模板可能已变化。"
   grep -q '^listen_addr:' "$HEADSCALE_CONFIG" || die "Headscale 配置中未找到 listen_addr 字段，当前版本配置模板可能已变化。"
   grep -q 'v4: 100.64.0.0/10' "$HEADSCALE_CONFIG" || warn "未找到默认 v4 网段，稍后请手动确认 prefixes.v4 是否已正确修改。"
-  grep -q 'https://controlplane.tailscale.com/derpmap/default' "$HEADSCALE_CONFIG" || warn "未找到默认 derpmap 配置项，稍后请手动确认 DERP 地址是否已正确写入。"
 
   sed -i "s|^server_url:.*|server_url: http://${SERVER_IP}:${HEADSCALE_PORT}|" "$HEADSCALE_CONFIG"
   sed -i "s|^listen_addr:.*|listen_addr: 127.0.0.1:${HEADSCALE_INTERNAL_PORT}|" "$HEADSCALE_CONFIG"
   sed -i "s|^\([[:space:]]*\)v4: 100.64.0.0/10|\1v4: ${IP_PREFIX}/24|" "$HEADSCALE_CONFIG"
   sed -i "s|^\([[:space:]]*\)v6: fd7a:115c:a1e0::/48|#\1v6: fd7a:115c:a1e0::/48|" "$HEADSCALE_CONFIG"
-  sed -i "s|^\([[:space:]]*\)- https://controlplane.tailscale.com/derpmap/default|#\1- https://controlplane.tailscale.com/derpmap/default\n\1- http://127.0.0.1/d/derp.json|" "$HEADSCALE_CONFIG"
+
+  if grep -q '^trusted_proxies: \[\]' "$HEADSCALE_CONFIG"; then
+    sed -i 's|^trusted_proxies: \[\]|trusted_proxies:\n  - "127.0.0.1/32"\n  - "::1/128"|' "$HEADSCALE_CONFIG"
+  elif grep -q '^trusted_proxies:' "$HEADSCALE_CONFIG"; then
+    if ! grep -A8 '^trusted_proxies:' "$HEADSCALE_CONFIG" | grep -q '127.0.0.1/32'; then
+      warn "trusted_proxies 已有自定义配置，未自动覆盖；请确认其中包含 127.0.0.1/32 和 ::1/128。"
+    fi
+  fi
+
+  # 保持本项目原有行为：不使用 Tailscale 官方 DERP，只加载本机自建 DERP Map。
+  # 如果用户已经配置了其它 DERP URL，则停止而不是覆盖。
+  custom_derp_urls="$(awk '
+    /^derp:/ { in_derp=1; next }
+    in_derp && /^[^[:space:]]/ { in_derp=0; in_urls=0 }
+    in_derp && /^  urls:/ { in_urls=1; next }
+    in_urls && /^  [[:alnum:]_]+:/ { in_urls=0 }
+    in_urls && /^[[:space:]]+- / { print }
+  ' "$HEADSCALE_CONFIG" | grep -v 'https://controlplane.tailscale.com/derpmap/default' || true)"
+  if [[ -n "$custom_derp_urls" ]]; then
+    die "检测到现有自定义 derp.urls，本脚本不会覆盖。请先手动确认是否保留这些 DERP URL，再重新执行。"
+  fi
+  if grep -q '^  urls:$' "$HEADSCALE_CONFIG"; then
+    sed -i 's|^  urls:$|  urls: []|' "$HEADSCALE_CONFIG"
+    sed -i '/^[[:space:]]*- https:\/\/controlplane\.tailscale\.com\/derpmap\/default[[:space:]]*$/d' "$HEADSCALE_CONFIG"
+  elif ! grep -q '^  urls: \[\]$' "$HEADSCALE_CONFIG"; then
+    die "无法安全识别 Headscale derp.urls 配置格式，脚本已停止，避免覆盖现有 DERP 设置。"
+  fi
+  sed -i '/^[[:space:]]*- http:\/\/127\.0\.0\.1\/d\/derp\.json[[:space:]]*$/d' "$HEADSCALE_CONFIG"
+
+  if grep -q '^  paths: \[\]' "$HEADSCALE_CONFIG"; then
+    sed -i "s|^  paths: \[\]|  paths:\n    - ${DERP_MAP}|" "$HEADSCALE_CONFIG"
+  elif grep -qF "${DERP_MAP}" "$HEADSCALE_CONFIG"; then
+    :
+  else
+    die "Headscale derp.paths 已有自定义内容，脚本不会覆盖。请手动加入 ${DERP_MAP} 后重试。"
+  fi
 
   grep -q "^server_url: http://${SERVER_IP}:${HEADSCALE_PORT}" "$HEADSCALE_CONFIG" || die "server_url 修改失败，请检查 Headscale 配置文件格式是否变化。"
   grep -q "^listen_addr: 127.0.0.1:${HEADSCALE_INTERNAL_PORT}" "$HEADSCALE_CONFIG" || die "listen_addr 修改失败，请检查 Headscale 配置文件格式是否变化。"
 
-  cat > "$DERP_JSON" <<EOF
-{
- "Regions": {
-  "900": {
-   "RegionID": 900,
-   "RegionCode": "myderp",
-   "Nodes": [
-    {
-     "Name": "a",
-     "RegionID": 900,
-     "DERPPort": ${DERP_PORT},
-     "IPv4": "${SERVER_IP}",
-     "InsecureForTests": true
-    }
-   ]
-  }
- }
-}
+  cat > "$DERP_MAP" <<EOF
+regions:
+  900:
+    regionid: 900
+    regioncode: myderp
+    regionname: My DERP
+    nodes:
+      - name: 900a
+        regionid: 900
+        hostname: "${DOMAIN}"
+        ipv4: "${SERVER_IP}"
+        stunport: 3478
+        derpport: ${DERP_PORT}
+        certname: "sha256-raw:${DERP_CERT_HASH}"
 EOF
+  chmod 0644 "$DERP_MAP"
 
+  info "执行 Headscale 配置校验..."
+  headscale -c "$HEADSCALE_CONFIG" configtest || die "Headscale configtest 失败，已停止启动；请根据上方错误检查配置。"
   systemctl restart headscale
-  systemctl restart nginx
   success "Headscale 配置完成。"
 }
 
@@ -740,35 +843,35 @@ create_apikey() {
   info "生成 Headscale API Key..."
   local attempt
   for attempt in 1 2 3 4 5; do
-    if headscale apikeys create --expiration 9999d; then
+    if headscale apikeys create; then
       return 0
     fi
     warn "API Key 生成失败，等待 Headscale 就绪后重试（${attempt}/5）..."
     sleep 3
   done
 
-  if ! headscale apikeys create --expiration 9999d; then
-    warn "API Key 自动生成失败，但主体安装已完成。可稍后手动执行：headscale apikeys create --expiration 9999d"
+  if ! headscale apikeys create; then
+    warn "API Key 自动生成失败，但主体安装已完成。可稍后手动执行：headscale apikeys create"
   fi
 }
 
 enable_verify_clients_if_needed() {
   local answer=""
   echo
-  warn "是否启用 DERP 客户端校验（--verify-clients）？"
+  warn "是否启用 DERP 客户端校验（通过 Headscale /verify）？"
   warn "建议先确认 Headscale、DERP、客户端接入都已经正常后再启用。"
   warn "启用后会限制未通过验证的客户端使用当前 DERP 中继服务。"
-  read -r -p "现在启用吗？[y/N]: " answer || true
-  answer="${answer:-N}"
+  read -r -p "现在启用吗？[Y/n]: " answer || true
+  answer="${answer:-Y}"
 
   if [[ "$answer" =~ ^[Yy]$ ]]; then
-    if grep -q -- '--verify-clients' "$DERP_SERVICE"; then
-      info "检测到 derp.service 已启用 --verify-clients，跳过重复修改。"
+    if grep -q -- '-verify-client-url ' "$DERP_SERVICE"; then
+      info "检测到 derp.service 已启用 Headscale /verify 校验，跳过重复修改。"
     else
-      sed -i 's|^ExecStart=.*|& --verify-clients|' "$DERP_SERVICE"
+      sed -i "s|^ExecStart=.*|& -verify-client-url http://127.0.0.1:${HEADSCALE_INTERNAL_PORT}/verify -verify-client-url-fail-open=false|" "$DERP_SERVICE"
       systemctl daemon-reload
       systemctl restart derp
-      success "已启用 DERP 客户端校验（--verify-clients）。"
+      success "已启用 DERP 客户端校验（Headscale /verify，验证服务异常时拒绝放行）。"
     fi
   else
     info "已跳过启用 DERP 客户端校验，后续可手动开启。"
@@ -792,14 +895,14 @@ ${GREEN}安装完成。${NC}
   tailscale up --login-server=http://${SERVER_IP}:${HEADSCALE_PORT} --accept-routes=true
   tailscale up --login-server=http://${SERVER_IP}:${HEADSCALE_PORT} --accept-routes=true --accept-dns=false --advertise-routes=192.168.2.0/24 --reset
 
-如需后续手动开启 DERP 客户端校验，可编辑：
-  /etc/systemd/system/derp.service
-在 ExecStart 最后追加：
-  --verify-clients
+DERP：
+- 自建 DERP Map: ${DERP_MAP}
+- 证书使用 SHA256 指纹固定，不再修改 Tailscale derper 源码
+- 请确认 UDP 3478（STUN）和 TCP ${DERP_PORT} 已放行
 
-然后执行：
-  systemctl daemon-reload
-  systemctl restart derp
+Peer Relay：
+- 安装完成后输入 hs，选择“Peer Relay 管理”
+- 连接优先级：DIRECT -> Peer Relay -> DERP
 EOF
 }
 
@@ -828,6 +931,7 @@ main() {
   fi
 
   validate_ipv4 "$SERVER_IP" || die "服务器IP格式不正确。"
+  validate_hostname_or_ipv4 "$DOMAIN" || die "DERP 域名/主机名格式不正确；只允许标准 DNS 主机名或 IPv4 地址。"
   validate_ipv4 "$IP_PREFIX" || die "IP前缀格式不正确，应类似 100.64.0.0"
   validate_port "$HEADSCALE_PORT" || die "Headscale端口无效。"
   [[ "$HEADSCALE_PORT" != "$HEADSCALE_INTERNAL_PORT" ]] || die "Headscale 外部访问端口不能使用内部保留端口 ${HEADSCALE_INTERNAL_PORT}。"

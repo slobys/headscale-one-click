@@ -52,12 +52,14 @@ show_access_info() {
   info "常用信息"
   echo "- Headscale 配置文件: /etc/headscale/config.yaml"
   echo "- DERP 服务文件: /etc/systemd/system/derp.service"
-  echo "- DERP JSON: /var/www/derp.json"
+  echo "- DERP Map: /etc/headscale/derp.yaml"
   echo "- 当前面板类型: ${PANEL_TYPE:-$panel_type}"
   echo "- 当前面板路径: ${PANEL_PATH:-$panel_path}"
   echo "- Headscale-ui 目录: /var/www/web"
   echo "- Headplane 目录: /opt/headplane"
   echo "- Headplane 配置: /etc/headplane/config.yaml"
+  echo "- Peer Relay 管理脚本: ${BASE_DIR}/peer-relay.sh"
+  echo "- Peer Relay 状态: /etc/headscale-one-click/peer-relay.env"
   echo "- Nginx 站点配置: /etc/nginx/sites-available/headscale-one-click.conf"
   echo
   echo "常用命令："
@@ -89,6 +91,7 @@ show_menu() {
   echo "6. 查看常用路径与命令"
   echo "7. 执行修复"
   echo "8. 检查上游最新版本"
+  echo "9. Peer Relay 管理"
   echo "0. 退出"
   echo "=========================================="
 }
@@ -130,6 +133,10 @@ main() {
         ;;
       8)
         bash "$BASE_DIR/check-updates.sh"
+        pause
+        ;;
+      9)
+        bash "$BASE_DIR/peer-relay.sh"
         pause
         ;;
       0)

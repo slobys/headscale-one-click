@@ -131,6 +131,7 @@ prepare_scripts() {
     "${INSTALL_DIR}/uninstall.sh" \
     "${INSTALL_DIR}/repair.sh" \
     "${INSTALL_DIR}/menu.sh" \
+    "${INSTALL_DIR}/peer-relay.sh" \
     "${INSTALL_DIR}/check-updates.sh" \
     "${INSTALL_DIR}/bootstrap.sh"
 
@@ -163,6 +164,9 @@ run_target() {
       ;;
     repair|--repair)
       exec bash ./repair.sh
+      ;;
+    relay|peer-relay|--peer-relay)
+      exec bash ./peer-relay.sh
       ;;
     *)
       warn "未知参数：${action}，已进入管理菜单。"

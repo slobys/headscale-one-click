@@ -49,7 +49,7 @@ repair_headplane_config() {
     return 0
   fi
 
-  warn "检测到异常 Headplane 配置格式，正在恢复为 v0.6.x 使用的 server 嵌套格式..."
+  warn "检测到异常 Headplane 配置格式，正在恢复为当前版本使用的 server 嵌套格式..."
   server_url="$(awk -F': ' '/^server_url:/ {print $2; exit}' /etc/headscale/config.yaml | tr -d '"')"
   listen_addr="$(awk -F': ' '/^listen_addr:/ {print $2; exit}' /etc/headscale/config.yaml | tr -d '"')"
   cookie_secret="$(awk -F': ' '/cookie_secret:/ {print $2; exit}' "$HEADPLANE_CONFIG" | tr -d '"')"

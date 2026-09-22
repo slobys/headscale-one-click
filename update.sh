@@ -22,7 +22,7 @@ die() {
 PANEL_STATE_FILE="/etc/headscale-one-click/panel.env"
 HEADPLANE_DIR="/opt/headplane"
 HEADPLANE_SERVICE="/etc/systemd/system/headplane.service"
-HEADPLANE_FALLBACK_VERSION="0.6.3"
+HEADPLANE_FALLBACK_VERSION="0.7.1"
 HEADSCALE_UI_FALLBACK_VERSION="2026.03.17"
 
 load_panel_state() {
