@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## v2.2.0 - 2026-09-23
+
+### Added
+- 管理菜单新增“查看安装信息”，可重新显示管理地址、Windows 客户端加入命令、子网路由、DERP 和 Peer Relay 信息
+- 管理菜单新增“查看设备连接路径”，把 `tailscale status` 翻译为 P2P 直连 / Peer Relay / DERP / 空闲或离线
+- 新安装会把 DERP 主机名、DERP/HTTP 端口、IP 网段和脚本版本写入状态文件；旧安装仍可从现有 Headscale/DERP 配置自动推断
+
+### Changed
+- 安装完成摘要和 README 的首次客户端接入命令改为 `tailscale login --login-server=...`，更贴近当前 Tailscale/Headscale 的首次登录流程
+
 ## v2.1.1 - 2026-09-23
 
 ### Changed

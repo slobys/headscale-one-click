@@ -25,6 +25,17 @@ curl -L --connect-timeout 15 https://cdn.jsdelivr.net/gh/slobys/headscale-one-cl
 hs
 ```
 
+菜单还提供：
+
+```text
+10. 查看安装信息
+11. 查看设备连接路径
+```
+
+“查看安装信息”会重新显示安装结束时容易丢失的管理面板地址、客户端加入命令、DERP 端口和 Peer Relay 信息；旧版本部署后即使 `panel.env` 没保存完整字段，也会尝试从现有 Headscale 和 systemd 配置中自动恢复。
+
+“查看设备连接路径”会从当前机器的 `tailscale status` 判断每个活跃连接是 **P2P 直连、Peer Relay 还是 DERP**。连接路径是点到点状态，并不是某台设备永久固定使用一种方式。
+
 如果只想打开菜单，不直接安装：
 
 ```bash
@@ -145,17 +156,25 @@ http://服务器IP:Headscale端口/web
 http://1.2.3.4:8080/web
 ```
 
-客户端接入：
+客户端首次接入（Windows / Linux / macOS 均可指定自定义控制服务器）：
 
 ```bash
-tailscale up --login-server=http://服务器IP:Headscale端口
+tailscale login --login-server=http://服务器IP:Headscale端口
 ```
 
 示例：
 
 ```bash
-tailscale up --login-server=http://1.2.3.4:8080
+tailscale login --login-server=http://1.2.3.4:8080
 ```
+
+Windows 如果 PowerShell 找不到 `tailscale` 命令，可使用：
+
+```powershell
+& "C:\\Program Files\\Tailscale\\tailscale.exe" login --login-server=http://1.2.3.4:8080
+```
+
+执行后会打开 Headscale 的注册页面；按照页面给出的 Auth ID，在服务器端完成批准后，Windows 客户端就会加入你的 Headscale 网络。
 
 如果需要接收子网路由：
 

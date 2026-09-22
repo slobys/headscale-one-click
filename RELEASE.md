@@ -1,24 +1,27 @@
-# headscale-one-click v2.1.1 Release Notes
+# headscale-one-click v2.2.0 Release Notes
 
 ## 标题建议
 
 ```text
-v2.1.1 - 大陆 VPS 安装可靠性修复
+v2.2.0 - 管理信息与连接路径增强
 ```
 
 ## Release 文案
 
 ```markdown
-## headscale-one-click v2.1.1
+## headscale-one-click v2.2.0
 
-这是 v2.1.0 的可靠性修复版，重点处理“服务器原本已有 Tailscale”以及静态升级失败时的回滚问题，不改变 Headscale 0.29 + Peer Relay + 原生 DERP 的总体架构。
+这一版重点增强安装后的日常管理和排障体验，不改变 Headscale 0.29 + Peer Relay + 原生 DERP 的总体架构。
 
-### 核心修复
-- Tailscale 静态升级前自动备份已有 CLI、daemon、systemd unit 和 `/etc/default/tailscaled`
-- 新 `tailscaled` 无法启动时自动恢复原二进制、配置、enable 状态和运行状态
-- 如果检测到 apt/vendor 的 `tailscaled.service`，优先继续复用，不再无条件创建 systemd override
-- Headplane 的 pnpm 固定安装到 `/usr/local`，避免自定义 npm prefix 导致脚本安装成功但找不到 pnpm
-- 保留 v2.1.0 的本地包优先、多线路下载、SHA256 校验和大陆 VPS 安装增强
+### 核心变化
+- `hs` 菜单新增 `10. 查看安装信息`
+- `hs` 菜单新增 `11. 查看设备连接路径`
+- “查看安装信息”可重新显示管理面板地址、Headscale 控制地址、Windows 客户端加入命令、子网路由示例、DERP 主机名/端口和 Peer Relay 状态
+- 兼容旧安装：即使旧版 `panel.env` 缺字段，也会从 Headscale 配置和 `derp.service` 自动推断
+- “查看设备连接路径”会把 `tailscale status` 翻译为 P2P 直连 / Peer Relay / DERP / 离线 / 空闲
+- 安装完成摘要与 README 的首次接入命令改用 `tailscale login --login-server=...`
+- 新安装会保存更多状态字段，后续无需重新安装也能重现安装信息
+- 完整保留 v2.1.1 的大陆 VPS 下载增强、Tailscale 回滚保护和 pnpm 路径修复
 
 ### 连接顺序
 
@@ -82,5 +85,5 @@ headscale tailscale derp peer-relay vpn self-hosted linux bash nginx china vps
 ## 博客 / 视频配套简介
 
 ```text
-Headscale One Click v2.1.1 在 v2.1.0 的大陆 VPS 下载增强基础上，新增 Tailscale 静态升级失败自动回滚、apt/vendor systemd unit 复用，以及 pnpm 固定安装路径，降低升级现有服务器时的风险。
+Headscale One Click v2.2.0 在 v2.1.1 的大陆 VPS 安装可靠性基础上，新增安装信息回看和设备连接路径查看功能，并把首次加入 Headscale 的客户端命令统一为 `tailscale login --login-server=...`，安装后维护更直观。
 ```

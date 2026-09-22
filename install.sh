@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-SCRIPT_VERSION="2.1.1"
+SCRIPT_VERSION="2.2.0"
 WORKDIR="/usr/local/src/headscale-one-click"
 DERP_DIR="/etc/derp"
 DERP_SERVICE="/etc/systemd/system/derp.service"
@@ -299,6 +299,12 @@ PANEL_PATH=${PANEL_PATH}
 SERVER_IP=${SERVER_IP}
 HEADSCALE_PORT=${HEADSCALE_PORT}
 HEADSCALE_INTERNAL_PORT=${HEADSCALE_INTERNAL_PORT}
+HEADSCALE_URL=http://${SERVER_IP}:${HEADSCALE_PORT}
+DERP_HOST=${DOMAIN}
+DERP_PORT=${DERP_PORT}
+DERP_HTTP_PORT=${HTTP_PORT}
+IP_PREFIX=${IP_PREFIX}
+INSTALL_SCRIPT_VERSION=${SCRIPT_VERSION}
 EOF
 }
 
@@ -1239,8 +1245,8 @@ ${GREEN}安装完成。${NC}
 访问地址：
 - 管理面板（${PANEL_TYPE}）: ${panel_url}
 
-客户端接入命令：
-  tailscale up --login-server=http://${SERVER_IP}:${HEADSCALE_PORT}
+客户端首次接入命令：
+  tailscale login --login-server=http://${SERVER_IP}:${HEADSCALE_PORT}
 
 子网路由示例：
   tailscale up --login-server=http://${SERVER_IP}:${HEADSCALE_PORT} --accept-routes=true
