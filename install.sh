@@ -1718,6 +1718,41 @@ show_nginx_failure_context() {
   journalctl -u nginx -n 30 --no-pager 2>/dev/null || true
 }
 
+wait_for_headscale_listener() {
+  local attempts="${1:-15}"
+  local i=0
+
+  for ((i=1; i<=attempts; i++)); do
+    if tcp_port_in_use "$HEADSCALE_INTERNAL_PORT"; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+wait_for_headscale_health() {
+  local attempts="${1:-15}"
+  local i=0
+
+  for ((i=1; i<=attempts; i++)); do
+    if curl -fsS --connect-timeout 2 --max-time 5 +      "http://127.0.0.1:${HEADSCALE_INTERNAL_PORT}/health" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+show_headscale_failure_context() {
+  warn "Headscale 当前监听："
+  ss -lntp 2>/dev/null | grep -E ":${HEADSCALE_INTERNAL_PORT}\b" | tail -n 10 || true
+  warn "Headscale 服务状态："
+  systemctl --no-pager --full status headscale 2>/dev/null | tail -n 30 || true
+  warn "Headscale 最近日志："
+  journalctl -u headscale -n 40 --no-pager 2>/dev/null || true
+}
+
 configure_nginx() {
   local staged=""
   local backup=""
@@ -1816,15 +1851,36 @@ switch_headscale_server_url() {
     die "切换 Headscale server_url 到 ${CONTROL_URL} 时 configtest 失败，已恢复原配置。"
   fi
 
-  if ! systemctl restart headscale || ! systemctl is-active --quiet headscale; then
+  if ! systemctl restart headscale; then
     error "Headscale 切换 HTTPS 后启动失败，正在恢复原 server_url..."
+    show_headscale_failure_context
     cp -f "$backup" "$HEADSCALE_CONFIG"
     systemctl restart headscale >/dev/null 2>&1 || true
     die "Headscale HTTPS 切换失败，已恢复原配置。"
   fi
 
-  if ! curl -fsS --max-time 5 "http://127.0.0.1:${HEADSCALE_INTERNAL_PORT}/health" >/dev/null; then
+  info "Headscale restart 已完成，等待本地 ${HEADSCALE_INTERNAL_PORT} 端口实际监听..."
+  if ! wait_for_headscale_listener 15; then
+    error "Headscale 重启后仍未监听本地 ${HEADSCALE_INTERNAL_PORT}，正在恢复原 server_url..."
+    show_headscale_failure_context
+    cp -f "$backup" "$HEADSCALE_CONFIG"
+    systemctl restart headscale >/dev/null 2>&1 || true
+    die "Headscale HTTPS 切换失败，已恢复原配置。"
+  fi
+  success "Headscale 已实际监听 127.0.0.1:${HEADSCALE_INTERNAL_PORT}。"
+
+  if ! systemctl is-active --quiet headscale; then
+    error "Headscale 端口出现后服务状态仍不是 active，正在恢复原 server_url..."
+    show_headscale_failure_context
+    cp -f "$backup" "$HEADSCALE_CONFIG"
+    systemctl restart headscale >/dev/null 2>&1 || true
+    die "Headscale HTTPS 切换失败，已恢复原配置。"
+  fi
+
+  info "验证 Headscale 本地 /health..."
+  if ! wait_for_headscale_health 15; then
     error "Headscale 本地健康检查失败，正在恢复原 server_url..."
+    show_headscale_failure_context
     cp -f "$backup" "$HEADSCALE_CONFIG"
     systemctl restart headscale >/dev/null 2>&1 || true
     die "Headscale HTTPS 切换后健康检查失败，已恢复原配置。"
