@@ -43,6 +43,7 @@ load_panel_state() {
   IP_PREFIX=""
   INSTALL_SCRIPT_VERSION=""
   PEER_RELAY_DEFAULT_PORT=""
+  LEGACY_HEADSCALE_PORT=""
 
   if [[ -f "$PANEL_STATE_FILE" ]]; then
     # shellcheck disable=SC1090
@@ -59,7 +60,11 @@ read_headscale_server_url() {
     url="$(awk -F': ' '/^server_url:/ {print $2; exit}' "$HEADSCALE_CONFIG" | tr -d '"')"
   fi
   if [[ -z "$url" && -n "${SERVER_IP:-}" && -n "${HEADSCALE_PORT:-}" ]]; then
-    url="http://${SERVER_IP}:${HEADSCALE_PORT}"
+    if [[ "$HEADSCALE_PORT" == "443" ]]; then
+      url="https://${SERVER_IP}"
+    else
+      url="http://${SERVER_IP}:${HEADSCALE_PORT}"
+    fi
   fi
   printf '%s\n' "$url"
 }
@@ -111,6 +116,12 @@ show_install_info() {
   echo "访问地址："
   echo "- 管理面板（${PANEL_TYPE:-headscale-ui}）: ${panel_url}"
   [[ -n "$server_url" ]] && echo "- Headscale 控制地址: ${server_url}"
+  if [[ "$server_url" == https://* ]]; then
+    echo "- Headscale HTTPS: 443/tcp（已启用）"
+  else
+    echo "- Headscale HTTPS: 未启用/旧配置"
+  fi
+  [[ -n "${LEGACY_HEADSCALE_PORT:-}" ]] && echo "- 旧版兼容 HTTP 端口: ${LEGACY_HEADSCALE_PORT}/tcp"
   echo
   echo "Windows / 普通客户端首次加入："
   if [[ -n "$server_url" ]]; then

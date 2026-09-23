@@ -41,6 +41,7 @@ repair_headplane_config() {
   local server_url=""
   local listen_addr=""
   local cookie_secret=""
+  local cookie_secure="false"
 
   [[ -f "$HEADPLANE_CONFIG" ]] || return 0
   [[ -f /etc/headscale/config.yaml ]] || return 0
@@ -57,6 +58,7 @@ repair_headplane_config() {
   [[ -n "$server_url" ]] || server_url="http://127.0.0.1:8080"
   [[ -n "$listen_addr" ]] || listen_addr="127.0.0.1:18080"
   [[ -n "$cookie_secret" ]] || cookie_secret="$(openssl rand -hex 16)"
+  [[ "$server_url" == https://* ]] && cookie_secure="true"
 
   cp -f "$HEADPLANE_CONFIG" "${HEADPLANE_CONFIG}.bak.$(date +%s)"
   mkdir -p "$HEADPLANE_DATA_DIR"
@@ -67,7 +69,7 @@ server:
   port: 3000
   base_url: "${server_url}"
   cookie_secret: "${cookie_secret}"
-  cookie_secure: false
+  cookie_secure: ${cookie_secure}
   cookie_max_age: 86400
   data_path: "${HEADPLANE_DATA_DIR}"
 
@@ -90,23 +92,11 @@ EOF
   success "Headplane 配置已修复。"
 }
 
-repair_nginx_host_header() {
-  local config_file=""
-  local changed=0
-
-  for config_file in "$NGINX_SITE_CONFIG" /etc/nginx/sites-available/default; do
-    [[ -f "$config_file" ]] || continue
-    if grep -q 'proxy_set_header Host \$host;' "$config_file"; then
-      warn "检测到 Nginx Host 头未保留端口，正在改为 \$http_host..."
-      cp -f "$config_file" "${config_file}.bak.$(date +%s)"
-      sed -i 's/proxy_set_header Host \$host;/proxy_set_header Host \$http_host;/g' "$config_file"
-      changed=1
-    fi
-  done
-
-  if [[ "$changed" -eq 1 ]]; then
-    success "Nginx Host 头已修复。"
-  fi
+check_nginx_control_proxy() {
+  [[ -f "$NGINX_SITE_CONFIG" ]] || return 0
+  grep -q 'listen 443 ssl' "$NGINX_SITE_CONFIG" || warn "当前 Nginx 尚未检测到 Headscale HTTPS 443 配置；建议重新执行安装流程完成 v2.3.1 迁移。"
+  grep -q 'proxy_set_header Upgrade \$http_upgrade;' "$NGINX_SITE_CONFIG" || warn "Nginx 缺少 Tailscale Control Protocol Upgrade 透传。"
+  grep -q 'proxy_set_header Connection \$headscale_connection_upgrade;' "$NGINX_SITE_CONFIG" || warn "Nginx 缺少 Headscale Connection Upgrade 映射。"
 }
 
 info "开始执行基础修复流程..."
@@ -157,7 +147,7 @@ else
 fi
 
 if [[ -f /etc/nginx/sites-available/headscale-one-click.conf ]]; then
-  repair_nginx_host_header
+  check_nginx_control_proxy
   info "检测到独立 Nginx 站点配置，执行语法检查..."
   if nginx -t; then
     success "Nginx 配置检查通过。"
@@ -165,7 +155,6 @@ if [[ -f /etc/nginx/sites-available/headscale-one-click.conf ]]; then
     warn "Nginx 配置检查失败，请手动检查 /etc/nginx/sites-available/headscale-one-click.conf"
   fi
 elif [[ -f /etc/nginx/sites-available/default ]]; then
-  repair_nginx_host_header
   info "执行 Nginx 配置检查..."
   if nginx -t; then
     success "Nginx 配置检查通过。"
@@ -177,8 +166,16 @@ fi
 info "尝试重启服务..."
 systemctl daemon-reload || true
 systemctl restart derp 2>/dev/null || true
-systemctl restart headscale 2>/dev/null || true
-systemctl restart nginx 2>/dev/null || true
+if [[ -f /etc/headscale/config.yaml ]] && headscale -c /etc/headscale/config.yaml configtest >/dev/null 2>&1; then
+  systemctl restart headscale 2>/dev/null || true
+else
+  warn "Headscale configtest 未通过，已跳过重启，避免把控制端主动打挂。"
+fi
+if nginx -t >/dev/null 2>&1; then
+  systemctl restart nginx 2>/dev/null || true
+else
+  warn "Nginx 配置检查未通过，已跳过重启。"
+fi
 systemctl restart headplane 2>/dev/null || true
 
 info "输出服务状态摘要..."
@@ -192,4 +189,4 @@ systemctl --no-pager --full status headplane 2>/dev/null || true
 
 echo
 success "基础修复流程执行完成。"
-warn "如果问题仍未解决，建议重点检查：域名解析、端口放行、Headscale Web UI 压缩包内容，以及 derper 编译阶段是否成功。"
+warn "如果问题仍未解决，建议重点检查：80/443 云安全组、HTTPS 证书续期、Headscale server_url、DERP/STUN 端口和客户端连接日志。"

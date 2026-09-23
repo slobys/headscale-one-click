@@ -1,3 +1,28 @@
+# headscale-one-click v2.3.1 Draft Release Notes
+
+## 标题建议
+
+```text
+v2.3.1 - Headscale HTTPS 443 与纯 IP 证书
+```
+
+## 核心变化
+
+- Headscale 客户端控制入口固定为 `HTTPS 443`
+- 纯公网 IPv4 可通过 Let's Encrypt IP 地址证书直接部署，无需域名
+- 项目专用 Certbot 5.4+ venv；IP 证书使用 webroot + shortlived profile
+- systemd Timer 自动续期，续期成功后 reload Nginx
+- Nginx `80/tcp` 只用于 ACME 和 `generate_204`，普通 HTTP 自动跳转 HTTPS
+- DERP TCP / Peer Relay UDP 继续随机；STUN 保持 `3478/udp`
+- v2.3.0 旧随机 HTTP Headscale 端口迁移时暂作为兼容入口保留
+- 先申请证书并验证 Nginx，再切换 Headscale `server_url`；失败时保留旧入口
+- 客户端加入命令统一改为 `tailscale login --login-server=https://主机`
+- 管理菜单安全重启、Peer Relay 中文状态卡片、CGNAT 网段限制一并包含
+
+> 此版本当前为 main 开发版，尚未发布正式 Release。
+
+---
+
 # headscale-one-click v2.3.0 Release Notes
 
 ## 标题建议

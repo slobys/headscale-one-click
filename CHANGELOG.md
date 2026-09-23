@@ -1,8 +1,17 @@
 # Changelog
 
-## Unreleased
+## v2.3.1 - Unreleased
+
+### Added
+- Headscale 控制端改为固定 HTTPS `443/tcp`，公网 IPv4 可直接申请 Let's Encrypt IP 地址证书，无需域名
+- 项目专用 Certbot 5.4+ Python venv，以及 systemd 自动续期 service/timer；IP 证书使用 `shortlived` profile + webroot
+- 旧 v2.3 随机 HTTP Headscale 端口在迁移后暂保留为兼容入口，避免已有客户端切换期间突然失联
 
 ### Changed
+- Nginx 新增 `80/tcp` ACME/`generate_204` 入口并将普通 HTTP 重定向到 HTTPS 443；控制协议 Upgrade 头按 Headscale 反代要求透传
+- Headscale `server_url`、管理面板地址、客户端加入命令统一改为 `https://主机`，内部服务仍为 `127.0.0.1:18080`
+- DERP TCP 与 Peer Relay UDP 继续首次随机；STUN 保持 `3478/udp`
+- HTTPS 迁移采用“先证书与 Nginx 验证，再切 server_url”的顺序；证书或 Nginx 失败时不破坏旧入口
 - Peer Relay 状态页改为中文可读状态卡片，不再直接显示 `tailscale status` 原始行和空的 `[]`；增加设备路径分类、端点、流量和路径汇总
 - 管理菜单“重启服务”改为选择性重启；Headscale/Nginx 重启前先检查配置，重启后验证服务状态，失败时直接显示状态和日志，不再无条件提示成功
 - Tailscale 虚拟 IPv4 网段校验收紧为 `100.64.0.0/10` 内的 `/24`，并排除 Tailscale 保留网段；已有不受支持网段会停止快速安装并提示迁移

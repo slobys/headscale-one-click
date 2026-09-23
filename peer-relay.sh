@@ -88,7 +88,11 @@ headscale_server_url() {
     url="$(awk -F': ' '/^server_url:/ {print $2; exit}' "$HEADSCALE_CONFIG" | tr -d '"')"
   fi
   if [[ -z "$url" && -n "${SERVER_IP:-}" ]]; then
-    url="http://${SERVER_IP}:${HEADSCALE_PORT}"
+    if [[ "${HEADSCALE_PORT:-}" == "443" ]]; then
+      url="https://${SERVER_IP}"
+    else
+      url="http://${SERVER_IP}:${HEADSCALE_PORT}"
+    fi
   fi
   printf '%s\n' "$url"
 }

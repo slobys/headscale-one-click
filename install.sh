@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-SCRIPT_VERSION="2.3.0"
+SCRIPT_VERSION="2.3.1"
+DERP_ASSET_RELEASE_VERSION="2.3.0"
 PROJECT_REPO="slobys/headscale-one-click"
 WORKDIR="/usr/local/src/headscale-one-click"
 DERP_DIR="/etc/derp"
@@ -13,6 +14,21 @@ NGINX_ENABLED="/etc/nginx/sites-enabled/${NGINX_SITE_NAME}.conf"
 HEADSCALE_CONFIG="/etc/headscale/config.yaml"
 HEADSCALE_UI_DIR="/var/www/web"
 HEADSCALE_INTERNAL_PORT="18080"
+HEADSCALE_HTTPS_PORT="443"
+ACME_HTTP_PORT="80"
+ACME_WEBROOT="/var/www/headscale-one-click-acme"
+CERTBOT_VENV="/opt/headscale-one-click/certbot"
+CERTBOT_BIN="${CERTBOT_VENV}/bin/certbot"
+LETSENCRYPT_LIVE_DIR="/etc/letsencrypt/live"
+CERTBOT_RENEW_SERVICE="/etc/systemd/system/headscale-one-click-certbot-renew.service"
+CERTBOT_RENEW_TIMER="/etc/systemd/system/headscale-one-click-certbot-renew.timer"
+ACME_NGINX_AVAILABLE="/etc/nginx/sites-available/headscale-one-click-acme.conf"
+ACME_NGINX_ENABLED="/etc/nginx/sites-enabled/headscale-one-click-acme.conf"
+CONTROL_URL=""
+CONTROL_HOST=""
+LEGACY_HEADSCALE_PORT=""
+TLS_CERT_PATH=""
+TLS_KEY_PATH=""
 TAILSCALE_FALLBACK_VERSION="1.102.4"
 DERPER_TAILSCALE_VERSION="1.102.4"
 HEADSCALE_FALLBACK_VERSION="0.29.3"
@@ -175,6 +191,9 @@ load_existing_install_defaults() {
   EXISTING_INSTALL=0
   EXISTING_SERVER_IP=""
   EXISTING_HEADSCALE_PORT=""
+  EXISTING_HEADSCALE_URL=""
+  EXISTING_CONTROL_HOST=""
+  EXISTING_LEGACY_HEADSCALE_PORT=""
   EXISTING_DERP_HOST=""
   EXISTING_DERP_PORT=""
   EXISTING_IP_PREFIX=""
@@ -186,6 +205,8 @@ load_existing_install_defaults() {
     EXISTING_INSTALL=1
     EXISTING_SERVER_IP="$(sed -n 's/^SERVER_IP=//p' "$PANEL_STATE_FILE" | head -n 1)"
     EXISTING_HEADSCALE_PORT="$(sed -n 's/^HEADSCALE_PORT=//p' "$PANEL_STATE_FILE" | head -n 1)"
+    EXISTING_HEADSCALE_URL="$(sed -n 's/^HEADSCALE_URL=//p' "$PANEL_STATE_FILE" | head -n 1)"
+    EXISTING_LEGACY_HEADSCALE_PORT="$(sed -n 's/^LEGACY_HEADSCALE_PORT=//p' "$PANEL_STATE_FILE" | head -n 1)"
     EXISTING_DERP_HOST="$(sed -n 's/^DERP_HOST=//p' "$PANEL_STATE_FILE" | head -n 1)"
     EXISTING_DERP_PORT="$(sed -n 's/^DERP_PORT=//p' "$PANEL_STATE_FILE" | head -n 1)"
     EXISTING_IP_PREFIX="$(sed -n 's/^IP_PREFIX=//p' "$PANEL_STATE_FILE" | head -n 1)"
@@ -196,11 +217,20 @@ load_existing_install_defaults() {
     EXISTING_INSTALL=1
   fi
 
-  if [[ -z "$EXISTING_HEADSCALE_PORT" && -f "$HEADSCALE_CONFIG" ]]; then
-    EXISTING_HEADSCALE_PORT="$(sed -nE 's|^server_url:[[:space:]]*http://[^:]+:([0-9]+).*|\1|p' "$HEADSCALE_CONFIG" | head -n 1)"
+  if [[ -z "$EXISTING_HEADSCALE_URL" && -f "$HEADSCALE_CONFIG" ]]; then
+    EXISTING_HEADSCALE_URL="$(sed -nE 's|^server_url:[[:space:]]*([^[:space:]#]+).*|\1|p' "$HEADSCALE_CONFIG" | head -n 1)"
   fi
-  if [[ -z "$EXISTING_SERVER_IP" && -f "$HEADSCALE_CONFIG" ]]; then
-    EXISTING_SERVER_IP="$(sed -nE 's|^server_url:[[:space:]]*http://([^:/]+).*|\1|p' "$HEADSCALE_CONFIG" | head -n 1)"
+  if [[ -z "$EXISTING_HEADSCALE_PORT" && -n "$EXISTING_HEADSCALE_URL" ]]; then
+    EXISTING_HEADSCALE_PORT="$(sed -nE 's|^https?://[^:/]+:([0-9]+).*|\1|p' <<< "$EXISTING_HEADSCALE_URL" | head -n 1)"
+    if [[ -z "$EXISTING_HEADSCALE_PORT" && "$EXISTING_HEADSCALE_URL" == https://* ]]; then
+      EXISTING_HEADSCALE_PORT="443"
+    fi
+  fi
+  if [[ -n "$EXISTING_HEADSCALE_URL" ]]; then
+    EXISTING_CONTROL_HOST="$(sed -E 's|^https?://([^/:]+).*|\1|' <<< "$EXISTING_HEADSCALE_URL")"
+  fi
+  if [[ -z "$EXISTING_SERVER_IP" && -n "$EXISTING_CONTROL_HOST" ]] && validate_ipv4 "$EXISTING_CONTROL_HOST"; then
+    EXISTING_SERVER_IP="$EXISTING_CONTROL_HOST"
   fi
   if [[ -f "$DERP_SERVICE" ]]; then
     [[ -n "$EXISTING_DERP_HOST" ]] || EXISTING_DERP_HOST="$(sed -nE 's/.*-hostname[ =]+([^ ]+).*/\1/p' "$DERP_SERVICE" | head -n 1)"
@@ -401,6 +431,11 @@ tcp_port_in_use() {
   ss -ltnH 2>/dev/null | awk '{print $4}' | grep -Eq "(^|:)$port$"
 }
 
+tcp_port_used_by_nginx() {
+  local port="$1"
+  ss -ltnpH 2>/dev/null | awk -v p=":$port" '$4 ~ p"$" && $0 ~ /nginx/ {found=1} END {exit(found ? 0 : 1)}'
+}
+
 udp_port_in_use() {
   local port="$1"
   ss -lunH 2>/dev/null | awk '{print $4}' | grep -Eq "(^|:)$port$"
@@ -456,7 +491,7 @@ random_free_port() {
 project_owns_tcp_port() {
   local port="$1"
   [[ -f "$DERP_SERVICE" ]] && grep -qE " -a :${port}([[:space:]]|$)" "$DERP_SERVICE" && return 0
-  [[ -f "$NGINX_AVAILABLE" ]] && grep -qE "^[[:space:]]*listen[[:space:]]+${port};" "$NGINX_AVAILABLE" && return 0
+  [[ -f "$NGINX_AVAILABLE" ]] && grep -qE "^[[:space:]]*listen[[:space:]]+${port}([[:space:]]|;)" "$NGINX_AVAILABLE" && return 0
   [[ -f "$HEADSCALE_CONFIG" ]] && grep -qE "^listen_addr:[[:space:]]+127\.0\.0\.1:${port}([[:space:]]|$)" "$HEADSCALE_CONFIG" && return 0
   return 1
 }
@@ -471,7 +506,8 @@ check_selected_ports() {
   [[ "$HEADSCALE_PORT" != "$DERP_PORT" ]] || die "Headscale 和 DERP 都使用 TCP，端口不能相同：${HEADSCALE_PORT}"
   [[ "$PEER_RELAY_DEFAULT_PORT" != "3478" ]] || die "Peer Relay UDP 端口不能与 STUN 3478/udp 相同。"
   [[ "$PEER_RELAY_DEFAULT_PORT" != "$HEADSCALE_PORT" && "$PEER_RELAY_DEFAULT_PORT" != "$DERP_PORT" ]] || die "为便于维护，Peer Relay 默认端口不能与 Headscale/DERP 使用相同数字。"
-  if tcp_port_in_use "$HEADSCALE_PORT" && ! project_owns_tcp_port "$HEADSCALE_PORT"; then die "Headscale 端口 ${HEADSCALE_PORT}/tcp 已被其它程序占用。"; fi
+  if tcp_port_in_use "$HEADSCALE_PORT" && ! project_owns_tcp_port "$HEADSCALE_PORT"; then die "Headscale HTTPS 端口 ${HEADSCALE_PORT}/tcp 已被其它程序占用。为避免覆盖现有 HTTPS 站点，脚本已停止。"; fi
+  if tcp_port_in_use "$ACME_HTTP_PORT" && ! tcp_port_used_by_nginx "$ACME_HTTP_PORT"; then die "ACME 验证需要 ${ACME_HTTP_PORT}/tcp，但该端口已被非 Nginx 程序占用。"; fi
   if tcp_port_in_use "$DERP_PORT" && ! project_owns_tcp_port "$DERP_PORT"; then die "DERP 端口 ${DERP_PORT}/tcp 已被其它程序占用。"; fi
   if tcp_port_in_use "$HEADSCALE_INTERNAL_PORT" && ! project_owns_tcp_port "$HEADSCALE_INTERNAL_PORT"; then die "Headscale 内部端口 ${HEADSCALE_INTERNAL_PORT}/tcp 已被其它程序占用。"; fi
   if udp_port_in_use 3478 && ! project_owns_udp_port 3478; then die "STUN 端口 3478/udp 已被其它程序占用。"; fi
@@ -507,12 +543,13 @@ ${YELLOW}========== 重要提醒 ==========${NC}
 为了更适合真实服务器环境，这个整合版不会自动清空防火墙。
 
 请手动确认以下端口已经放行：
+- Headscale HTTPS: 443/tcp（固定，客户端控制连接）
+- ACME HTTP: 80/tcp（证书申请与自动续期）
 - DERP 端口: ${DERP_PORT}/tcp
 - STUN 端口: 3478/udp
 - Peer Relay 默认端口: ${PEER_RELAY_DEFAULT_PORT}/udp（启用 Peer Relay 时再放行）
 - DERP HTTP 监听: 已关闭
-- Headscale 端口: ${HEADSCALE_PORT}
-- 如果已有反代/HTTPS，还要放行 80 / 443
+- Headscale 内部端口 ${HEADSCALE_INTERNAL_PORT}/tcp 只监听本机，不应公网放行
 ${YELLOW}==============================${NC}
 EOF
 }
@@ -537,7 +574,7 @@ install_base_packages() {
   info "更新软件源并安装基础依赖..."
   apt_update_once
   ask_system_upgrade
-  DEBIAN_FRONTEND=noninteractive apt install -y wget git openssl curl unzip nginx ca-certificates tar xz-utils iproute2
+  DEBIAN_FRONTEND=noninteractive apt install -y wget git openssl curl unzip nginx ca-certificates tar xz-utils iproute2 python3 python3-venv
 }
 
 prepare_workdir() {
@@ -553,7 +590,8 @@ PANEL_PATH=${PANEL_PATH}
 SERVER_IP=${SERVER_IP}
 HEADSCALE_PORT=${HEADSCALE_PORT}
 HEADSCALE_INTERNAL_PORT=${HEADSCALE_INTERNAL_PORT}
-HEADSCALE_URL=http://${SERVER_IP}:${HEADSCALE_PORT}
+HEADSCALE_URL=${CONTROL_URL}
+LEGACY_HEADSCALE_PORT=${LEGACY_HEADSCALE_PORT}
 DERP_HOST=${DOMAIN}
 DERP_PORT=${DERP_PORT}
 DERP_HTTP_PORT=-1
@@ -633,7 +671,7 @@ github_download_urls() {
 
 derper_release_urls() {
   local filename="$1"
-  local source_url="https://github.com/${PROJECT_REPO}/releases/download/v${SCRIPT_VERSION}/${filename}"
+  local source_url="https://github.com/${PROJECT_REPO}/releases/download/v${DERP_ASSET_RELEASE_VERSION}/${filename}"
   github_download_urls "$source_url"
 }
 
@@ -1258,15 +1296,15 @@ install_headplane() {
 server:
   host: "127.0.0.1"
   port: ${HEADPLANE_PORT}
-  base_url: "http://${SERVER_IP}:${HEADSCALE_PORT}"
+  base_url: "${CONTROL_URL}"
   cookie_secret: "${cookie_secret}"
-  cookie_secure: false
+  cookie_secure: true
   cookie_max_age: 86400
   data_path: "${HEADPLANE_DATA_DIR}"
 
 headscale:
   url: "http://127.0.0.1:${HEADSCALE_INTERNAL_PORT}"
-  public_url: "http://${SERVER_IP}:${HEADSCALE_PORT}"
+  public_url: "${CONTROL_URL}"
   config_path: "${HEADSCALE_CONFIG}"
   config_strict: false
 
@@ -1305,80 +1343,395 @@ EOF
   success "Headplane 部署完成。"
 }
 
-configure_nginx() {
-  info "配置 Nginx..."
-
-  mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
-
-  cat > "$NGINX_AVAILABLE" <<EOF
-##
-map \$http_upgrade \$connection_upgrade {
- default keep-alive;
- "websocket" upgrade;
- "" close;
+certbot_version_number() {
+  [[ -x "$CERTBOT_BIN" ]] || return 1
+  "$CERTBOT_BIN" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n 1
 }
-server {
- listen ${HEADSCALE_PORT};
- listen [::]:${HEADSCALE_PORT};
- server_name ${SERVER_IP};
-EOF
 
-  if [[ "$PANEL_TYPE" == "headplane" ]]; then
-    cat >> "$NGINX_AVAILABLE" <<EOF
- location = /admin {
- return 301 /admin/;
- }
- location /admin/ {
- proxy_pass http://127.0.0.1:${HEADPLANE_PORT};
- proxy_http_version 1.1;
- proxy_set_header Upgrade \$http_upgrade;
- proxy_set_header Connection \$connection_upgrade;
- proxy_set_header Host \$http_host;
- proxy_buffering off;
- proxy_set_header X-Real-IP \$remote_addr;
- proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
- proxy_set_header X-Forwarded-Proto \$scheme;
- }
- location / {
- proxy_pass http://127.0.0.1:${HEADSCALE_INTERNAL_PORT};
- proxy_http_version 1.1;
- proxy_set_header Upgrade \$http_upgrade;
- proxy_set_header Connection \$connection_upgrade;
- proxy_set_header Host \$http_host;
- proxy_buffering off;
- proxy_set_header X-Real-IP \$remote_addr;
- proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
- proxy_set_header X-Forwarded-Proto \$scheme;
- }
-}
-EOF
-  else
-    cat >> "$NGINX_AVAILABLE" <<EOF
- location / {
- proxy_pass http://127.0.0.1:${HEADSCALE_INTERNAL_PORT};
- proxy_http_version 1.1;
- proxy_set_header Upgrade \$http_upgrade;
- proxy_set_header Connection \$connection_upgrade;
- proxy_set_header Host \$http_host;
- proxy_buffering off;
- proxy_set_header X-Real-IP \$remote_addr;
- proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
- proxy_set_header X-Forwarded-Proto \$scheme;
- }
- location /web {
- index index.html;
- alias /var/www/web;
- }
-}
-EOF
+install_certbot_runtime() {
+  local version=""
+  local pip_bin="${CERTBOT_VENV}/bin/pip"
+
+  if [[ -x "$CERTBOT_BIN" ]]; then
+    version="$(certbot_version_number || true)"
+    if [[ -n "$version" ]] && version_ge "$version" "5.4.0"; then
+      info "检测到 Certbot ${version}，满足 IP 证书要求。"
+      return 0
+    fi
   fi
 
+  info "安装项目专用 Certbot 5.4+ 运行环境..."
+  rm -rf "$CERTBOT_VENV"
+  mkdir -p "$(dirname "$CERTBOT_VENV")"
+  python3 -m venv "$CERTBOT_VENV"
+  "$pip_bin" install --disable-pip-version-check --upgrade pip setuptools wheel
+  if ! "$pip_bin" install --disable-pip-version-check --upgrade 'certbot>=5.4,<6'; then
+    warn "PyPI 官方源安装 Certbot 失败，尝试清华镜像..."
+    "$pip_bin" install --disable-pip-version-check --upgrade -i https://pypi.tuna.tsinghua.edu.cn/simple 'certbot>=5.4,<6'
+  fi
+
+  version="$(certbot_version_number || true)"
+  [[ -n "$version" ]] && version_ge "$version" "5.4.0" || die "Certbot 安装失败或版本低于 5.4，无法申请公网 IP HTTPS 证书。"
+  success "Certbot ${version} 安装完成。"
+}
+
+write_acme_nginx_config() {
+  local probe_file=""
+  local probe_value="headscale-acme-ok"
+
+  info "准备 ACME HTTP-01 验证入口..."
+  mkdir -p "$(dirname "$ACME_NGINX_AVAILABLE")" "$(dirname "$ACME_NGINX_ENABLED")" "$ACME_WEBROOT/.well-known/acme-challenge"
+
+  if [[ -f "$NGINX_AVAILABLE" ]] \
+    && grep -qE "^[[:space:]]*listen[[:space:]]+${ACME_HTTP_PORT};" "$NGINX_AVAILABLE" \
+    && grep -qF "server_name ${CONTROL_HOST};" "$NGINX_AVAILABLE" \
+    && grep -qF '/.well-known/acme-challenge/' "$NGINX_AVAILABLE"; then
+    probe_file="$ACME_WEBROOT/.well-known/acme-challenge/headscale-one-click-probe"
+    printf '%s' "$probe_value" > "$probe_file"
+    if curl -fsS --max-time 5 -H "Host: ${CONTROL_HOST}" "http://127.0.0.1/.well-known/acme-challenge/headscale-one-click-probe" | grep -qx "$probe_value"; then
+      rm -f "$probe_file"
+      info "现有 Nginx 已可提供 ACME challenge，复用当前 80/tcp 配置。"
+      return 0
+    fi
+    rm -f "$probe_file"
+  fi
+
+  cat > "$ACME_NGINX_AVAILABLE" <<EOF
+server {
+  listen ${ACME_HTTP_PORT};
+  listen [::]:${ACME_HTTP_PORT};
+  server_name ${CONTROL_HOST};
+
+  location ^~ /.well-known/acme-challenge/ {
+    root ${ACME_WEBROOT};
+    default_type text/plain;
+    try_files \$uri =404;
+  }
+
+  location = /generate_204 {
+    return 204;
+  }
+
+  location / {
+    return 200 "Headscale ACME bootstrap\n";
+  }
+}
+EOF
+  ln -sfn "$ACME_NGINX_AVAILABLE" "$ACME_NGINX_ENABLED"
+  if ! nginx -t; then
+    rm -f "$ACME_NGINX_ENABLED" "$ACME_NGINX_AVAILABLE"
+    die "Nginx ACME 临时配置校验失败。现有 Headscale 配置未切换。"
+  fi
+  systemctl enable nginx >/dev/null 2>&1 || true
+  if ! systemctl reload nginx 2>/dev/null; then
+    systemctl restart nginx
+  fi
+
+  probe_file="$ACME_WEBROOT/.well-known/acme-challenge/headscale-one-click-probe"
+  printf '%s' "$probe_value" > "$probe_file"
+  if ! curl -fsS --max-time 5 -H "Host: ${CONTROL_HOST}" "http://127.0.0.1/.well-known/acme-challenge/headscale-one-click-probe" | grep -qx "$probe_value"; then
+    rm -f "$probe_file"
+    die "本机 ACME webroot 验证失败，未继续申请证书。"
+  fi
+  rm -f "$probe_file"
+}
+
+cleanup_acme_nginx_bootstrap() {
+  rm -f "$ACME_NGINX_ENABLED" "$ACME_NGINX_AVAILABLE"
+  nginx -t >/dev/null 2>&1 && systemctl reload nginx >/dev/null 2>&1 || true
+}
+
+obtain_tls_certificate() {
+  local -a args=()
+
+  install_certbot_runtime
+  write_acme_nginx_config
+
+  TLS_CERT_PATH="${LETSENCRYPT_LIVE_DIR}/${CONTROL_HOST}/fullchain.pem"
+  TLS_KEY_PATH="${LETSENCRYPT_LIVE_DIR}/${CONTROL_HOST}/privkey.pem"
+
+  args=(
+    certonly
+    --non-interactive
+    --agree-tos
+    --register-unsafely-without-email
+    --webroot
+    --webroot-path "$ACME_WEBROOT"
+    --cert-name "$CONTROL_HOST"
+    --keep-until-expiring
+  )
+
+  if validate_ipv4 "$CONTROL_HOST"; then
+    args+=(--preferred-profile shortlived --ip-address "$CONTROL_HOST")
+  else
+    args+=(-d "$CONTROL_HOST")
+  fi
+
+  info "申请 Headscale HTTPS 证书：${CONTROL_HOST}"
+  if ! "$CERTBOT_BIN" "${args[@]}"; then
+    cleanup_acme_nginx_bootstrap
+    die "Let's Encrypt 证书申请失败。请确认公网 80/tcp 已放行，且 ${CONTROL_HOST} 指向本机公网 IP。旧 Headscale 入口未被切换。"
+  fi
+
+  [[ -s "$TLS_CERT_PATH" && -s "$TLS_KEY_PATH" ]] || {
+    cleanup_acme_nginx_bootstrap
+    die "Certbot 返回成功，但未找到证书文件：${TLS_CERT_PATH}"
+  }
+  openssl x509 -in "$TLS_CERT_PATH" -noout -checkend 86400 >/dev/null 2>&1 || {
+    cleanup_acme_nginx_bootstrap
+    die "新证书有效期异常，拒绝切换 Headscale HTTPS 入口。"
+  }
+  success "HTTPS 证书已准备完成。"
+}
+
+install_certbot_renewal_timer() {
+  cat > "$CERTBOT_RENEW_SERVICE" <<EOF
+[Unit]
+Description=Renew Headscale One Click TLS certificate
+After=network-online.target nginx.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=${CERTBOT_BIN} renew --quiet --deploy-hook "/bin/systemctl reload nginx"
+EOF
+
+  cat > "$CERTBOT_RENEW_TIMER" <<'EOF'
+[Unit]
+Description=Renew Headscale One Click TLS certificate regularly
+
+[Timer]
+OnCalendar=*-*-* 00,12:17:00
+RandomizedDelaySec=1800
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable --now headscale-one-click-certbot-renew.timer
+}
+
+append_headscale_proxy_location() {
+  local file="$1"
+  cat >> "$file" <<EOF
+  location / {
+    proxy_pass http://127.0.0.1:${HEADSCALE_INTERNAL_PORT};
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade \$http_upgrade;
+    proxy_set_header Connection \$headscale_connection_upgrade;
+    proxy_set_header Host \$host;
+    proxy_set_header True-Client-IP \$remote_addr;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+    proxy_buffering off;
+  }
+EOF
+}
+
+append_panel_locations() {
+  local file="$1"
+  if [[ "$PANEL_TYPE" == "headplane" ]]; then
+    cat >> "$file" <<EOF
+  location = /admin {
+    return 301 /admin/;
+  }
+  location /admin/ {
+    proxy_pass http://127.0.0.1:${HEADPLANE_PORT};
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade \$http_upgrade;
+    proxy_set_header Connection \$headscale_connection_upgrade;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+    proxy_buffering off;
+  }
+EOF
+  else
+    cat >> "$file" <<'EOF'
+  location /web {
+    index index.html;
+    alias /var/www/web;
+  }
+EOF
+  fi
+}
+
+write_final_nginx_config() {
+  local file="$1"
+  local default_server=""
+
+  validate_ipv4 "$CONTROL_HOST" && default_server=" default_server"
+
+  cat > "$file" <<EOF
+##
+# Headscale One Click - HTTPS control endpoint
+map \$http_upgrade \$headscale_connection_upgrade {
+  "websocket" upgrade;
+  default keep-alive;
+  '' close;
+}
+
+server {
+  listen ${ACME_HTTP_PORT};
+  listen [::]:${ACME_HTTP_PORT};
+  server_name ${CONTROL_HOST};
+
+  location ^~ /.well-known/acme-challenge/ {
+    root ${ACME_WEBROOT};
+    default_type text/plain;
+    try_files \$uri =404;
+  }
+
+  location = /generate_204 {
+    return 204;
+  }
+
+  location / {
+    return 301 https://${CONTROL_HOST}\$request_uri;
+  }
+}
+
+server {
+  listen ${HEADSCALE_HTTPS_PORT} ssl${default_server};
+  listen [::]:${HEADSCALE_HTTPS_PORT} ssl${default_server};
+  http2 on;
+  server_name ${CONTROL_HOST};
+
+  ssl_certificate ${TLS_CERT_PATH};
+  ssl_certificate_key ${TLS_KEY_PATH};
+  ssl_protocols TLSv1.2 TLSv1.3;
+
+  location = /generate_204 {
+    return 204;
+  }
+EOF
+
+  append_panel_locations "$file"
+  append_headscale_proxy_location "$file"
+  echo "}" >> "$file"
+
+  if [[ -n "$LEGACY_HEADSCALE_PORT" && "$LEGACY_HEADSCALE_PORT" != "$HEADSCALE_HTTPS_PORT" ]]; then
+    cat >> "$file" <<EOF
+
+# Legacy v2.3 HTTP compatibility listener.
+# Keep temporarily so previously registered clients can reach Headscale while migrating to HTTPS 443.
+server {
+  listen ${LEGACY_HEADSCALE_PORT};
+  listen [::]:${LEGACY_HEADSCALE_PORT};
+  server_name ${CONTROL_HOST};
+EOF
+    append_panel_locations "$file"
+    append_headscale_proxy_location "$file"
+    echo "}" >> "$file"
+  fi
+}
+
+configure_nginx() {
+  local staged=""
+  local backup=""
+  local had_old=0
+
+  info "配置 Headscale HTTPS 443 与 Nginx..."
+  obtain_tls_certificate
+
+  mkdir -p "$(dirname "$NGINX_AVAILABLE")" "$(dirname "$NGINX_ENABLED")"
+  staged="$(mktemp)"
+  write_final_nginx_config "$staged"
+
+  if [[ -f "$NGINX_AVAILABLE" ]]; then
+    had_old=1
+    backup="${NGINX_AVAILABLE}.pre-https.$(date +%s)"
+    cp -a "$NGINX_AVAILABLE" "$backup"
+  fi
+
+  cp -f "$staged" "$NGINX_AVAILABLE"
+  rm -f "$staged" "$ACME_NGINX_ENABLED" "$ACME_NGINX_AVAILABLE"
   ln -sfn "$NGINX_AVAILABLE" "$NGINX_ENABLED"
 
-  nginx -t
-  systemctl enable nginx
-  systemctl restart nginx
-  success "Nginx 配置完成。"
+  if ! nginx -t; then
+    error "最终 HTTPS Nginx 配置校验失败，正在恢复旧配置..."
+    if [[ "$had_old" -eq 1 ]]; then
+      cp -f "$backup" "$NGINX_AVAILABLE"
+    else
+      rm -f "$NGINX_AVAILABLE" "$NGINX_ENABLED"
+    fi
+    nginx -t >/dev/null 2>&1 && systemctl reload nginx >/dev/null 2>&1 || true
+    die "Nginx HTTPS 配置失败，Headscale server_url 尚未切换。"
+  fi
+
+  systemctl enable nginx >/dev/null 2>&1 || true
+  if ! systemctl reload nginx 2>/dev/null; then
+    if ! systemctl restart nginx; then
+      error "Nginx HTTPS 启动失败，正在恢复旧配置..."
+      if [[ "$had_old" -eq 1 ]]; then
+        cp -f "$backup" "$NGINX_AVAILABLE"
+      else
+        rm -f "$NGINX_AVAILABLE" "$NGINX_ENABLED"
+      fi
+      nginx -t >/dev/null 2>&1 && systemctl restart nginx >/dev/null 2>&1 || true
+      die "Nginx HTTPS 启动失败，Headscale server_url 尚未切换。"
+    fi
+  fi
+
+  if ! curl -fsS --max-time 8 --connect-to "${CONTROL_HOST}:443:127.0.0.1:443" "${CONTROL_URL}/health" >/dev/null; then
+    error "HTTPS 443 本机验证失败，正在恢复旧 Nginx 配置..."
+    if [[ "$had_old" -eq 1 ]]; then
+      cp -f "$backup" "$NGINX_AVAILABLE"
+    else
+      rm -f "$NGINX_AVAILABLE" "$NGINX_ENABLED"
+    fi
+    nginx -t >/dev/null 2>&1 && systemctl restart nginx >/dev/null 2>&1 || true
+    die "HTTPS 入口未通过健康检查，Headscale server_url 尚未切换。"
+  fi
+
+  install_certbot_renewal_timer
+  success "Nginx HTTPS 443 配置完成。"
+  [[ -n "$LEGACY_HEADSCALE_PORT" && "$LEGACY_HEADSCALE_PORT" != "443" ]] && warn "旧 HTTP ${LEGACY_HEADSCALE_PORT}/tcp 暂作为兼容入口保留；新客户端请统一使用 ${CONTROL_URL}。"
+}
+
+switch_headscale_server_url() {
+  local backup=""
+
+  backup="${HEADSCALE_CONFIG}.pre-https.$(date +%s)"
+  cp -a "$HEADSCALE_CONFIG" "$backup"
+  sed -i "s|^server_url:.*|server_url: ${CONTROL_URL}|" "$HEADSCALE_CONFIG"
+  grep -q '^tls_cert_path:' "$HEADSCALE_CONFIG" && sed -i 's|^tls_cert_path:.*|tls_cert_path: ""|' "$HEADSCALE_CONFIG" || true
+  grep -q '^tls_key_path:' "$HEADSCALE_CONFIG" && sed -i 's|^tls_key_path:.*|tls_key_path: ""|' "$HEADSCALE_CONFIG" || true
+
+  if ! headscale -c "$HEADSCALE_CONFIG" configtest; then
+    cp -f "$backup" "$HEADSCALE_CONFIG"
+    die "切换 Headscale server_url 到 ${CONTROL_URL} 时 configtest 失败，已恢复原配置。"
+  fi
+
+  if ! systemctl restart headscale || ! systemctl is-active --quiet headscale; then
+    error "Headscale 切换 HTTPS 后启动失败，正在恢复原 server_url..."
+    cp -f "$backup" "$HEADSCALE_CONFIG"
+    systemctl restart headscale >/dev/null 2>&1 || true
+    die "Headscale HTTPS 切换失败，已恢复原配置。"
+  fi
+
+  if ! curl -fsS --max-time 5 "http://127.0.0.1:${HEADSCALE_INTERNAL_PORT}/health" >/dev/null; then
+    error "Headscale 本地健康检查失败，正在恢复原 server_url..."
+    cp -f "$backup" "$HEADSCALE_CONFIG"
+    systemctl restart headscale >/dev/null 2>&1 || true
+    die "Headscale HTTPS 切换后健康检查失败，已恢复原配置。"
+  fi
+
+  success "Headscale 控制地址已切换为 ${CONTROL_URL}"
+}
+
+update_existing_headplane_public_url() {
+  [[ -f "$HEADPLANE_CONFIG" ]] || return 0
+  sed -i -E "s|^([[:space:]]*base_url:[[:space:]]*).*$|\1\"${CONTROL_URL}\"|" "$HEADPLANE_CONFIG" || true
+  sed -i -E "s|^([[:space:]]*public_url:[[:space:]]*).*$|\1\"${CONTROL_URL}\"|" "$HEADPLANE_CONFIG" || true
+  sed -i -E 's|^([[:space:]]*cookie_secure:[[:space:]]*).*$|\\1true|' "$HEADPLANE_CONFIG" || true
+  if systemctl cat headplane >/dev/null 2>&1; then
+    systemctl restart headplane || warn "Headplane 公网地址已更新，但服务重启失败，请稍后检查。"
+  fi
 }
 
 configure_headscale() {
@@ -1393,7 +1746,6 @@ configure_headscale() {
   grep -q '^listen_addr:' "$HEADSCALE_CONFIG" || die "Headscale 配置中未找到 listen_addr 字段，当前版本配置模板可能已变化。"
   grep -q 'v4: 100.64.0.0/10' "$HEADSCALE_CONFIG" || warn "未找到默认 v4 网段，稍后请手动确认 prefixes.v4 是否已正确修改。"
 
-  sed -i "s|^server_url:.*|server_url: http://${SERVER_IP}:${HEADSCALE_PORT}|" "$HEADSCALE_CONFIG"
   sed -i "s|^listen_addr:.*|listen_addr: 127.0.0.1:${HEADSCALE_INTERNAL_PORT}|" "$HEADSCALE_CONFIG"
   sed -i "s|^\([[:space:]]*\)v4: 100.64.0.0/10|\1v4: ${IP_PREFIX}/24|" "$HEADSCALE_CONFIG"
   sed -i "s|^\([[:space:]]*\)v6: fd7a:115c:a1e0::/48|#\1v6: fd7a:115c:a1e0::/48|" "$HEADSCALE_CONFIG"
@@ -1434,7 +1786,6 @@ configure_headscale() {
     die "Headscale derp.paths 已有自定义内容，脚本不会覆盖。请手动加入 ${DERP_MAP} 后重试。"
   fi
 
-  grep -q "^server_url: http://${SERVER_IP}:${HEADSCALE_PORT}" "$HEADSCALE_CONFIG" || die "server_url 修改失败，请检查 Headscale 配置文件格式是否变化。"
   grep -q "^listen_addr: 127.0.0.1:${HEADSCALE_INTERNAL_PORT}" "$HEADSCALE_CONFIG" || die "listen_addr 修改失败，请检查 Headscale 配置文件格式是否变化。"
 
   cat > "$DERP_MAP" <<EOF
@@ -1501,7 +1852,7 @@ enable_verify_clients_if_needed() {
 
 post_install_health_check() {
   local failures=0
-  local panel_url="http://127.0.0.1:${HEADSCALE_PORT}${PANEL_PATH%/}/"
+  local panel_url="${CONTROL_URL}${PANEL_PATH%/}/"
 
   echo
   echo "========== 安装验收 =========="
@@ -1510,7 +1861,10 @@ post_install_health_check() {
   if curl -fsS --connect-timeout 3 --max-time 5 "http://127.0.0.1:${HEADSCALE_INTERNAL_PORT}/health" >/dev/null 2>&1; then echo "Headscale /health      ✓"; else echo "Headscale /health      ✗"; failures=$((failures + 1)); fi
   if nginx -t >/dev/null 2>&1; then echo "Nginx config           ✓"; else echo "Nginx config           ✗"; failures=$((failures + 1)); fi
   if systemctl is-active --quiet nginx; then echo "Nginx service          ✓"; else echo "Nginx service          ✗"; failures=$((failures + 1)); fi
-  if curl -fsS --connect-timeout 3 --max-time 5 -H "Host: ${SERVER_IP}" "$panel_url" >/dev/null 2>&1; then echo "管理面板               ✓"; else echo "管理面板               ✗"; failures=$((failures + 1)); fi
+  if curl -fsS --connect-timeout 3 --max-time 8 --connect-to "${CONTROL_HOST}:443:127.0.0.1:443" "${CONTROL_URL}/health" >/dev/null 2>&1; then echo "HTTPS 443 control      ✓"; else echo "HTTPS 443 control      ✗"; failures=$((failures + 1)); fi
+  if curl -fsS --connect-timeout 3 --max-time 8 --connect-to "${CONTROL_HOST}:443:127.0.0.1:443" "$panel_url" >/dev/null 2>&1; then echo "管理面板               ✓"; else echo "管理面板               ✗"; failures=$((failures + 1)); fi
+  if [[ -s "$TLS_CERT_PATH" ]] && openssl x509 -in "$TLS_CERT_PATH" -noout -checkend 86400 >/dev/null 2>&1; then echo "TLS certificate        ✓"; else echo "TLS certificate        ✗"; failures=$((failures + 1)); fi
+  if systemctl is-enabled --quiet headscale-one-click-certbot-renew.timer 2>/dev/null && systemctl is-active --quiet headscale-one-click-certbot-renew.timer 2>/dev/null; then echo "TLS renew timer        ✓"; else echo "TLS renew timer        ✗"; failures=$((failures + 1)); fi
   if systemctl is-active --quiet derp; then echo "DERP service           ✓"; else echo "DERP service           ✗"; failures=$((failures + 1)); fi
   if tcp_port_in_use "$DERP_PORT"; then echo "DERP TCP ${DERP_PORT}        ✓"; else echo "DERP TCP ${DERP_PORT}        ✗"; failures=$((failures + 1)); fi
   if udp_port_in_use 3478; then echo "STUN UDP 3478         ✓"; else echo "STUN UDP 3478         ✗"; failures=$((failures + 1)); fi
@@ -1530,7 +1884,7 @@ post_install_health_check() {
 }
 
 show_summary() {
-  local panel_url="http://${SERVER_IP}:${HEADSCALE_PORT}${PANEL_PATH}"
+  local panel_url="${CONTROL_URL}${PANEL_PATH}"
 
   cat <<EOF
 
@@ -1540,14 +1894,14 @@ ${GREEN}安装完成。${NC}
 - 管理面板（${PANEL_TYPE}）: ${panel_url}
 
 客户端首次接入命令：
-  tailscale login --login-server=http://${SERVER_IP}:${HEADSCALE_PORT}
+  tailscale login --login-server=${CONTROL_URL}
 
 Tailscale 虚拟内网网段：
   ${IP_PREFIX}/24
 
 子网路由示例：
-  tailscale up --login-server=http://${SERVER_IP}:${HEADSCALE_PORT} --accept-routes=true
-  tailscale up --login-server=http://${SERVER_IP}:${HEADSCALE_PORT} --accept-routes=true --accept-dns=false --advertise-routes=192.168.2.0/24 --reset
+  tailscale up --login-server=${CONTROL_URL} --accept-routes=true
+  tailscale up --login-server=${CONTROL_URL} --accept-routes=true --accept-dns=false --advertise-routes=192.168.2.0/24 --reset
 
 DERP：
 - 自建 DERP Map: ${DERP_MAP}
@@ -1568,7 +1922,6 @@ main() {
   local reinstall_panel=1
   local current_headscale=""
   local current_tailscale=""
-  local default_headscale_port=""
   local default_derp_port=""
   local default_peer_relay_port=""
 
@@ -1581,6 +1934,12 @@ main() {
   load_existing_install_defaults
   show_preflight_summary
   prompt_install_mode
+  HEADSCALE_PORT="$HEADSCALE_HTTPS_PORT"
+  if [[ -n "${EXISTING_LEGACY_HEADSCALE_PORT:-}" ]]; then
+    LEGACY_HEADSCALE_PORT="$EXISTING_LEGACY_HEADSCALE_PORT"
+  elif [[ -n "${EXISTING_HEADSCALE_PORT:-}" && "${EXISTING_HEADSCALE_PORT}" != "$HEADSCALE_HTTPS_PORT" ]]; then
+    LEGACY_HEADSCALE_PORT="$EXISTING_HEADSCALE_PORT"
+  fi
 
   if [[ "$INSTALL_MODE" == "quick" ]]; then
     if [[ "$EXISTING_INSTALL" -eq 1 ]]; then
@@ -1589,9 +1948,8 @@ main() {
         prompt_server_ip "$SERVER_IP_DEFAULT"
       fi
       DOMAIN="${EXISTING_DERP_HOST:-$SERVER_IP}"
-      [[ -n "$EXISTING_HEADSCALE_PORT" ]] || die "检测到已有安装，但无法识别原 Headscale 端口。请改用高级模式确认配置，脚本不会擅自更换端口。"
+      CONTROL_HOST="${EXISTING_CONTROL_HOST:-$SERVER_IP}"
       [[ -n "$EXISTING_DERP_PORT" ]] || die "检测到已有安装，但无法识别原 DERP 端口。请改用高级模式确认配置，脚本不会擅自更换端口。"
-      HEADSCALE_PORT="$EXISTING_HEADSCALE_PORT"
       DERP_PORT="$EXISTING_DERP_PORT"
       PEER_RELAY_DEFAULT_PORT="${EXISTING_PEER_RELAY_PORT:-40000}"
       PANEL_TYPE="${EXISTING_PANEL_TYPE:-headscale-ui}"
@@ -1604,7 +1962,7 @@ main() {
         prompt_server_ip ""
       fi
       DOMAIN="$SERVER_IP"
-      HEADSCALE_PORT="$(random_free_port tcp)" || die "无法为 Headscale 生成可用随机端口。"
+      CONTROL_HOST="$SERVER_IP"
       DERP_PORT="$(random_free_port tcp "$HEADSCALE_PORT")" || die "无法为 DERP 生成可用随机端口。"
       PEER_RELAY_DEFAULT_PORT="$(random_free_port udp "$HEADSCALE_PORT" "$DERP_PORT")" || die "无法为 Peer Relay 生成可用随机端口。"
       PANEL_TYPE="headscale-ui"
@@ -1626,23 +1984,21 @@ main() {
     else
       HEADSCALE_UI_VERSION="$HEADSCALE_UI_FALLBACK_VERSION"
     fi
-    info "快速模式：新安装默认使用公网 IP 作为 DERP 主机名，并为公网服务随机生成一次端口；已有安装会继承原配置。"
+    info "快速模式：Headscale 固定使用 HTTPS 443；DERP / Peer Relay 首次安装随机端口；已有安装保留原 DERP、Peer Relay 和面板配置。"
   else
     prompt_server_ip "${EXISTING_SERVER_IP:-${SERVER_IP_DEFAULT:-}}"
     prompt_value DOMAIN "请输入 DERP 主机名（无域名可直接使用公网 IP）" "${EXISTING_DERP_HOST:-$SERVER_IP}"
-    default_headscale_port="${EXISTING_HEADSCALE_PORT:-}"
-    [[ -n "$default_headscale_port" ]] || default_headscale_port="$(random_free_port tcp)" || die "无法生成 Headscale 默认随机端口。"
+    prompt_value CONTROL_HOST "请输入 Headscale HTTPS 主机（域名或公网 IP）" "${EXISTING_CONTROL_HOST:-$SERVER_IP}"
     default_derp_port="${EXISTING_DERP_PORT:-}"
-    [[ -n "$default_derp_port" ]] || default_derp_port="$(random_free_port tcp "$default_headscale_port")" || die "无法生成 DERP 默认随机端口。"
+    [[ -n "$default_derp_port" ]] || default_derp_port="$(random_free_port tcp "$HEADSCALE_PORT")" || die "无法生成 DERP 默认随机端口。"
     default_peer_relay_port="${EXISTING_PEER_RELAY_PORT:-}"
     if [[ -z "$default_peer_relay_port" ]]; then
       if [[ "$EXISTING_INSTALL" -eq 1 ]]; then
         default_peer_relay_port="40000"
       else
-        default_peer_relay_port="$(random_free_port udp "$default_headscale_port" "$default_derp_port")" || die "无法生成 Peer Relay 默认随机端口。"
+        default_peer_relay_port="$(random_free_port udp "$HEADSCALE_PORT" "$default_derp_port")" || die "无法生成 Peer Relay 默认随机端口。"
       fi
     fi
-    prompt_value HEADSCALE_PORT "请输入 Headscale 端口" "$default_headscale_port"
     prompt_ip_prefix "${EXISTING_IP_PREFIX:-100.64.0.0}"
     prompt_value DERP_PORT "请输入 DERP 服务端口" "$default_derp_port"
     prompt_value PEER_RELAY_DEFAULT_PORT "请输入 Peer Relay 默认 UDP 端口（启用时使用）" "$default_peer_relay_port"
@@ -1661,8 +2017,11 @@ main() {
     fi
   fi
 
+  CONTROL_HOST="${CONTROL_HOST:-$SERVER_IP}"
+  CONTROL_URL="https://${CONTROL_HOST}"
   validate_ipv4 "$SERVER_IP" || die "服务器 IP 格式不正确。"
   validate_hostname_or_ipv4 "$DOMAIN" || die "DERP 主机名格式不正确；只允许标准 DNS 主机名或 IPv4 地址。"
+  validate_hostname_or_ipv4 "$CONTROL_HOST" || die "Headscale HTTPS 主机格式不正确；只允许标准 DNS 主机名或 IPv4 地址。"
   validate_ip_prefix24 "$IP_PREFIX" || die "Tailscale 虚拟内网网段必须是 100.64.0.0/10 内的 /24，例如 100.64.10.0/24；不能使用 10.x、172.16.x 或 192.168.x。"
   validate_port "$HEADSCALE_PORT" || die "Headscale 端口无效。"
   validate_port "$DERP_PORT" || die "DERP 端口无效。"
@@ -1674,7 +2033,8 @@ main() {
   echo "模式:          ${INSTALL_MODE}"
   echo "服务器 IP:     ${SERVER_IP}"
   echo "DERP 主机名:   ${DOMAIN}"
-  echo "Headscale:     ${HEADSCALE_VERSION} / TCP ${HEADSCALE_PORT}"
+  echo "Headscale:     ${HEADSCALE_VERSION} / ${CONTROL_URL} / HTTPS TCP 443"
+  [[ -n "$LEGACY_HEADSCALE_PORT" ]] && echo "兼容旧入口:    HTTP TCP ${LEGACY_HEADSCALE_PORT}（仅已有 v2.3 安装迁移保留）"
   echo "Tailscale:     ${TAILSCALE_VERSION}"
   echo "虚拟内网网段: ${IP_PREFIX}/24"
   echo "DERP:          Tailscale ${DERPER_TAILSCALE_VERSION} 预编译版 / TCP ${DERP_PORT} / UDP 3478"
@@ -1702,6 +2062,8 @@ main() {
     info "快速升级检测到已有面板，跳过重复安装面板文件。"
   fi
   configure_nginx
+  switch_headscale_server_url
+  update_existing_headplane_public_url
   save_panel_state
   if [[ "$EXISTING_INSTALL" -eq 0 ]]; then
     create_apikey

@@ -27,6 +27,12 @@ HEADPLANE_DIR="/opt/headplane"
 HEADPLANE_CONFIG_DIR="/etc/headplane"
 HEADPLANE_DATA_DIR="/var/lib/headplane"
 HEADPLANE_SERVICE="/etc/systemd/system/headplane.service"
+CERTBOT_VENV="/opt/headscale-one-click/certbot"
+CERTBOT_RENEW_SERVICE="/etc/systemd/system/headscale-one-click-certbot-renew.service"
+CERTBOT_RENEW_TIMER="/etc/systemd/system/headscale-one-click-certbot-renew.timer"
+ACME_WEBROOT="/var/www/headscale-one-click-acme"
+ACME_NGINX_AVAILABLE="/etc/nginx/sites-available/headscale-one-click-acme.conf"
+ACME_NGINX_ENABLED="/etc/nginx/sites-enabled/headscale-one-click-acme.conf"
 
 load_panel_state() {
   PANEL_TYPE="headscale-ui"
@@ -47,12 +53,14 @@ cat <<EOF
 - Headscale 服务
 - 当前已安装的管理面板文件
 - 当前脚本生成的 Nginx 独立站点配置
+- 项目专用 Certbot 运行环境与自动续期 Timer
 - /etc/headscale/derp.yaml（脚本生成的自建 DERP Map）
 - Peer Relay 本地状态和 Grant 示例片段
 
 注意：
 - 不会自动删除 Tailscale 客户端
 - 不会删除或修改你自己的 Headscale policy
+- 不会自动删除 /etc/letsencrypt 中已经签发的证书，以免影响其它服务
 - 不会自动清空你系统其它业务文件
 EOF
 
@@ -75,6 +83,8 @@ systemctl stop headscale 2>/dev/null || true
 systemctl disable headscale 2>/dev/null || true
 systemctl stop headplane 2>/dev/null || true
 systemctl disable headplane 2>/dev/null || true
+systemctl stop headscale-one-click-certbot-renew.timer 2>/dev/null || true
+systemctl disable headscale-one-click-certbot-renew.timer 2>/dev/null || true
 
 info "删除 DERP 服务文件与证书..."
 rm -f /etc/systemd/system/derp.service
@@ -90,10 +100,13 @@ rm -f "$HEADPLANE_SERVICE"
 rm -f "$PANEL_STATE_FILE"
 rm -f "$PEER_RELAY_STATE_FILE"
 rm -f "$GRANT_SNIPPET_FILE"
+rm -rf "$CERTBOT_VENV" "$ACME_WEBROOT"
+rm -f "$CERTBOT_RENEW_SERVICE" "$CERTBOT_RENEW_TIMER"
 
 info "删除脚本生成的 Nginx 配置..."
 rm -f /etc/nginx/sites-enabled/headscale-one-click.conf
 rm -f /etc/nginx/sites-available/headscale-one-click.conf
+rm -f "$ACME_NGINX_ENABLED" "$ACME_NGINX_AVAILABLE"
 
 info "尝试卸载 Headscale..."
 apt-get remove -y headscale 2>/dev/null || true
@@ -103,4 +116,4 @@ systemctl daemon-reload
 nginx -t >/dev/null 2>&1 && systemctl restart nginx || true
 
 success "卸载完成。"
-warn "如果你后续还想继续复用这台机器，本脚本特意没有删除 Tailscale 和 Go，避免误删其它用途依赖。"
+warn "为避免误删其它用途依赖，本脚本没有删除 Tailscale，也保留 /etc/letsencrypt 中已签发证书。"
