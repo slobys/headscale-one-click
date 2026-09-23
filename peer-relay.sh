@@ -215,34 +215,205 @@ save_relay_state() {
   chmod 0600 "$PEER_RELAY_STATE_FILE"
 }
 
-show_status() {
-  echo
-  info "Peer Relay 状态"
-  if ! command -v tailscale >/dev/null 2>&1; then
-    warn "未安装 Tailscale。"
+human_bytes() {
+  local value="${1:-0}"
+  if [[ ! "$value" =~ ^[0-9]+$ ]]; then
+    printf '%s B\n' "$value"
     return 0
   fi
-  echo "- Tailscale: $(tailscale_version || echo unknown)"
-  if is_connected; then
-    echo "- Headscale 登录状态: 已连接"
-    echo "- 本机 Tailscale IPv4: $(tailscale ip -4 2>/dev/null | head -n 1 || echo unknown)"
-  else
-    echo "- Headscale 登录状态: 未连接"
+  awk -v n="$value" 'BEGIN {
+    if (n < 1024) printf "%d B", n;
+    else if (n < 1048576) printf "%.1f KB", n / 1024;
+    else if (n < 1073741824) printf "%.1f MB", n / 1048576;
+    else printf "%.1f GB", n / 1073741824;
+  }'
+}
+
+pretty_os() {
+  case "${1:-}" in
+    windows) printf '%s\n' "Windows" ;;
+    linux) printf '%s\n' "Linux" ;;
+    android) printf '%s\n' "Android" ;;
+    ios) printf '%s\n' "iOS" ;;
+    macos|darwin) printf '%s\n' "macOS" ;;
+    *) printf '%s\n' "${1:-未知}" ;;
+  esac
+}
+
+grant_label() {
+  case "${1:-}" in
+    autogroup:member) printf '%s\n' "网络成员（autogroup:member）" ;;
+    "*") printf '%s\n' "所有设备（*）" ;;
+    "") printf '%s\n' "未配置" ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+
+status_path_label() {
+  local line="$1"
+  case "$line" in
+    *"peer-relay"*) printf '%s\n' "🟡 Peer Relay 中继" ;;
+    *"direct"*) printf '%s\n' "🟢 P2P 直连" ;;
+    *"relay "*) printf '%s\n' "🟠 DERP 中继" ;;
+    *"offline"*) printf '%s\n' "⚫ 离线" ;;
+    *) printf '%s\n' "⚪ 空闲 / 尚未建立连接" ;;
+  esac
+}
+
+show_peer_connection_summary() {
+  local output="$1"
+  local line=""
+  local ip=""
+  local name=""
+  local os=""
+  local path=""
+  local endpoint=""
+  local tx=""
+  local rx=""
+  local tx_h=""
+  local rx_h=""
+  local total=0
+  local direct_count=0
+  local relay_count=0
+  local derp_count=0
+  local other_count=0
+
+  echo
+  echo "---------- 当前设备连接 ----------"
+
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    ip="$(awk '{print $1}' <<< "$line")"
+    name="$(awk '{print $2}' <<< "$line")"
+    os="$(pretty_os "$(awk '{print $4}' <<< "$line")")"
+    [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ || "$ip" == *:* ]] || continue
+    [[ -n "$name" ]] || continue
+
+    path="$(status_path_label "$line")"
+    endpoint=""
+    tx=""
+    rx=""
+
+    case "$line" in
+      *"peer-relay"*)
+        relay_count=$((relay_count + 1))
+        endpoint="$(sed -nE 's/.*peer-relay[[:space:]]+([^, ]+).*/\1/p' <<< "$line")"
+        ;;
+      *"direct"*)
+        direct_count=$((direct_count + 1))
+        endpoint="$(sed -nE 's/.*direct[[:space:]]+([^, ]+).*/\1/p' <<< "$line")"
+        ;;
+      *"relay "*)
+        derp_count=$((derp_count + 1))
+        endpoint="$(sed -nE 's/.*relay[[:space:]]+"?([^", ]+)"?.*/\1/p' <<< "$line")"
+        ;;
+      *)
+        other_count=$((other_count + 1))
+        ;;
+    esac
+
+    tx="$(sed -nE 's/.*tx[[:space:]]+([0-9]+).*/\1/p' <<< "$line")"
+    rx="$(sed -nE 's/.*rx[[:space:]]+([0-9]+).*/\1/p' <<< "$line")"
+
+    echo
+    echo "设备：${name}"
+    echo "  Tailscale IP：${ip}"
+    [[ -n "$os" ]] && echo "  系统：${os}"
+    echo "  当前路径：${path}"
+
+    if [[ -n "$endpoint" ]]; then
+      case "$line" in
+        *"direct"*) echo "  对端公网地址：${endpoint}" ;;
+        *"peer-relay"*) echo "  Peer Relay 路径：${endpoint}" ;;
+        *"relay "*) echo "  DERP 节点：${endpoint}" ;;
+      esac
+    fi
+
+    if [[ -n "$tx" || -n "$rx" ]]; then
+      tx_h="$(human_bytes "${tx:-0}")"
+      rx_h="$(human_bytes "${rx:-0}")"
+      echo "  流量：发送 ${tx_h} / 接收 ${rx_h}"
+    fi
+
+    total=$((total + 1))
+  done <<< "$output"
+
+  if [[ "$total" -eq 0 ]]; then
+    echo
+    echo "⚪ 暂时没有可显示的其它设备连接。"
   fi
+
+  echo
+  echo "---------- 路径汇总 ----------"
+  echo "🟢 P2P 直连：${direct_count}"
+  echo "🟡 Peer Relay：${relay_count}"
+  echo "🟠 DERP 中继：${derp_count}"
+  [[ "$other_count" -gt 0 ]] && echo "⚪ 其它 / 空闲 / 离线：${other_count}"
+
+  echo
+  if [[ "$relay_count" -gt 0 ]]; then
+    echo "✅ 当前检测到 ${relay_count} 条连接正在使用 Peer Relay。"
+  else
+    echo "⚪ 当前没有检测到连接正在使用 Peer Relay。"
+    echo "   这通常表示当前连接可以 P2P 直连，或尚未产生需要 Relay 的流量。"
+  fi
+
+  echo
+  echo "说明：这里显示的是“当前这台 VPS → 其它设备”的连接路径。"
+  echo "      要判断 Windows → NAS / OpenWrt 的路径，请在 Windows 上执行 tailscale status 或 tailscale ping。"
+}
+
+show_status() {
+  local status_output=""
+  local relay_configured="否"
+  local login_state="❌ 未连接"
+  local local_ip="unknown"
+
+  echo
+  echo "=========================================="
+  echo "  Peer Relay 状态"
+  echo "=========================================="
+
+  if ! command -v tailscale >/dev/null 2>&1; then
+    echo "Tailscale：       ❌ 未安装"
+    echo "=========================================="
+    return 0
+  fi
+
+  if is_connected; then
+    login_state="✅ 已连接"
+    local_ip="$(tailscale ip -4 2>/dev/null | head -n 1 || echo unknown)"
+  fi
+
   if [[ -f "$PEER_RELAY_STATE_FILE" ]]; then
     # shellcheck disable=SC1090
     source "$PEER_RELAY_STATE_FILE"
-    echo "- 配置端口: ${PEER_RELAY_PORT:-unknown}/udp"
-    echo "- 静态端点: ${PEER_RELAY_ENDPOINT:-未设置}"
-    echo "- Relay Tailscale IP: ${PEER_RELAY_IP:-unknown}"
-    echo "- Grant src: ${PEER_RELAY_SRC:-unknown}"
-  else
-    echo "- 脚本状态: 尚未通过本脚本启用"
+    relay_configured="✅ 已启用"
   fi
-  echo
-  tailscale debug peer-relay-servers 2>/dev/null || true
-  echo
-  tailscale status 2>/dev/null | grep -E 'peer-relay|direct|relay' || true
+
+  echo "Relay 配置：      ${relay_configured}"
+  echo "Tailscale：       $(tailscale_version || echo unknown)"
+  echo "Headscale：       ${login_state}"
+  echo "Relay 本机 IP：   ${PEER_RELAY_IP:-$local_ip}"
+
+  if [[ -f "$PEER_RELAY_STATE_FILE" ]]; then
+    echo "Relay UDP 端口：  ${PEER_RELAY_PORT:-unknown}"
+    echo "公网端点：        ${PEER_RELAY_ENDPOINT:-未设置}"
+    echo "Grant 权限：      $(grant_label "${PEER_RELAY_SRC:-}")"
+  else
+    echo "Relay UDP 端口：  未配置"
+    echo "公网端点：        未配置"
+    echo "Grant 权限：      未配置"
+  fi
+
+  if status_output="$(tailscale status 2>/dev/null)"; then
+    show_peer_connection_summary "$status_output"
+  else
+    echo
+    warn "无法读取设备连接状态。"
+  fi
+
+  echo "=========================================="
 }
 
 enable_relay() {

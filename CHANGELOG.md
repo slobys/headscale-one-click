@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Changed
+- Peer Relay 状态页改为中文可读状态卡片，不再直接显示 `tailscale status` 原始行和空的 `[]`；增加设备路径分类、端点、流量和路径汇总
+
 ## v2.3.0 - 2026-09-23
 
 ### Added
