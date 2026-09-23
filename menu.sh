@@ -255,13 +255,159 @@ show_access_info() {
   echo "- 查看 Headplane 日志: journalctl -u headplane -f"
 }
 
+service_exists() {
+  systemctl cat "$1" >/dev/null 2>&1
+}
+
+show_service_failure() {
+  local service="$1"
+  echo
+  systemctl status "$service" --no-pager -l 2>/dev/null | tail -n 20 || true
+  echo
+  echo "最近日志："
+  journalctl -u "$service" -n 20 --no-pager 2>/dev/null || true
+}
+
+restart_service_checked() {
+  local service="$1"
+  local label="$2"
+  local health_port="18080"
+
+  if ! service_exists "$service"; then
+    warn "${label} 未安装，已跳过。"
+    return 0
+  fi
+
+  case "$service" in
+    headscale)
+      info "重启前检查 Headscale 配置 ..."
+      load_panel_state
+      health_port="${HEADSCALE_INTERNAL_PORT:-18080}"
+      if ! headscale -c "$HEADSCALE_CONFIG" configtest; then
+        error "Headscale configtest 失败，为避免控制端掉线，已取消重启。"
+        return 1
+      fi
+      ;;
+    nginx)
+      info "重启前检查 Nginx 配置 ..."
+      if ! nginx -t; then
+        error "Nginx 配置检查失败，已取消重启。"
+        return 1
+      fi
+      ;;
+  esac
+
+  info "正在重启 ${label} ..."
+  if ! systemctl restart "$service"; then
+    error "${label} 重启命令执行失败。"
+    show_service_failure "$service"
+    return 1
+  fi
+
+  sleep 1
+  if ! systemctl is-active --quiet "$service"; then
+    error "${label} 重启后未处于运行状态。"
+    show_service_failure "$service"
+    return 1
+  fi
+
+  if [[ "$service" == "headscale" ]] && command -v curl >/dev/null 2>&1; then
+    local ok=0
+    local i
+    for i in {1..10}; do
+      if curl -fsS --max-time 2 "http://127.0.0.1:${health_port}/health" >/dev/null 2>&1; then
+        ok=1
+        break
+      fi
+      sleep 1
+    done
+    if [[ "$ok" -ne 1 ]]; then
+      warn "Headscale 服务已启动，但本机 /health 暂未响应，请稍后再查看状态。"
+    fi
+  fi
+
+  success "${label} 已成功重启。"
+}
+
+restart_all_services() {
+  local confirm=""
+  local failures=0
+
+  echo
+  warn "全部重启会包含 Headscale。重启 Headscale 时，管理面板中的设备可能短暂显示离线，通常会自动重连。"
+  read -r -p "确认全部重启？[y/N]: " confirm || true
+  [[ "${confirm,,}" == "y" || "${confirm,,}" == "yes" ]] || {
+    info "已取消。"
+    return 0
+  }
+
+  restart_service_checked derp "DERP" || failures=$((failures + 1))
+  restart_service_checked nginx "Nginx" || failures=$((failures + 1))
+  restart_service_checked headplane "Headplane" || failures=$((failures + 1))
+  restart_service_checked headscale "Headscale" || failures=$((failures + 1))
+
+  echo
+  if [[ "$failures" -eq 0 ]]; then
+    success "全部已安装服务重启完成。"
+  else
+    error "有 ${failures} 个服务重启失败，请根据上面的状态和日志处理。"
+    return 1
+  fi
+}
+
 restart_services() {
-  info "重启 derp / headscale / nginx / headplane ..."
-  systemctl restart derp 2>/dev/null || true
-  systemctl restart headscale 2>/dev/null || true
-  systemctl restart nginx 2>/dev/null || true
-  systemctl restart headplane 2>/dev/null || true
-  success "服务重启完成。"
+  local choice=""
+
+  while true; do
+    echo
+    echo "=========================================="
+    echo "  重启服务"
+    echo "=========================================="
+    echo "1. 重启 DERP"
+    echo "2. 重启 Headscale"
+    echo "3. 重启 Nginx"
+    echo "4. 重启 Headplane"
+    echo "5. 全部重启"
+    echo "0. 返回"
+    echo "=========================================="
+    read -r -p "请输入选项: " choice || true
+
+    case "${choice:-}" in
+      1)
+        restart_service_checked derp "DERP" || true
+        pause
+        ;;
+      2)
+        echo
+        warn "重启 Headscale 会让设备在管理面板中短暂显示离线。"
+        read -r -p "确认重启 Headscale？[y/N]: " choice || true
+        if [[ "${choice,,}" == "y" || "${choice,,}" == "yes" ]]; then
+          restart_service_checked headscale "Headscale" || true
+        else
+          info "已取消。"
+        fi
+        pause
+        ;;
+      3)
+        restart_service_checked nginx "Nginx" || true
+        pause
+        ;;
+      4)
+        restart_service_checked headplane "Headplane" || true
+        pause
+        ;;
+      5)
+        restart_all_services || true
+        pause
+        ;;
+      0)
+        return 0
+        ;;
+      *)
+        warn "无效选项，请重新输入。"
+        ;;
+    esac
+  done
 }
 
 show_menu() {
@@ -273,7 +419,7 @@ show_menu() {
   echo "2. 执行更新"
   echo "3. 执行卸载"
   echo "4. 查看服务状态"
-  echo "5. 重启服务"
+  echo "5. 重启服务（选择服务）"
   echo "6. 查看常用路径与命令"
   echo "7. 执行修复"
   echo "8. 检查上游最新版本"
@@ -309,7 +455,6 @@ main() {
         ;;
       5)
         restart_services
-        pause
         ;;
       6)
         show_access_info
