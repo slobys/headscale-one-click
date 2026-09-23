@@ -1612,7 +1612,6 @@ server {
 server {
   listen ${HEADSCALE_HTTPS_PORT} ssl${default_server};
   listen [::]:${HEADSCALE_HTTPS_PORT} ssl${default_server};
-  http2 on;
   server_name ${CONTROL_HOST};
 
   ssl_certificate ${TLS_CERT_PATH};
