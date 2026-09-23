@@ -229,7 +229,15 @@ load_existing_install_defaults() {
   if [[ -n "$EXISTING_HEADSCALE_URL" ]]; then
     EXISTING_CONTROL_HOST="$(sed -E 's|^https?://([^/:]+).*|\1|' <<< "$EXISTING_HEADSCALE_URL")"
   fi
-  if [[ -z "$EXISTING_SERVER_IP" && -n "$EXISTING_CONTROL_HOST" ]] && validate_ipv4 "$EXISTING_CONTROL_HOST"; then
+  if [[ -n "$EXISTING_CONTROL_HOST" ]] && validate_ipv4 "$EXISTING_CONTROL_HOST" && ! validate_public_ipv4 "$EXISTING_CONTROL_HOST"; then
+    warn "检测到旧 Headscale 控制主机 ${EXISTING_CONTROL_HOST} 不是公网 IPv4，已忽略该值。"
+    EXISTING_CONTROL_HOST=""
+  fi
+  if [[ -n "$EXISTING_SERVER_IP" ]] && validate_ipv4 "$EXISTING_SERVER_IP" && ! validate_public_ipv4 "$EXISTING_SERVER_IP"; then
+    warn "检测到旧 SERVER_IP=${EXISTING_SERVER_IP} 不是公网 IPv4，已忽略并重新检测公网 IP。"
+    EXISTING_SERVER_IP=""
+  fi
+  if [[ -z "$EXISTING_SERVER_IP" && -n "$EXISTING_CONTROL_HOST" ]] && validate_public_ipv4 "$EXISTING_CONTROL_HOST"; then
     EXISTING_SERVER_IP="$EXISTING_CONTROL_HOST"
   fi
   if [[ -f "$DERP_SERVICE" ]]; then
@@ -303,6 +311,33 @@ validate_ipv4() {
   done
 }
 
+validate_public_ipv4() {
+  local ip="$1"
+  local a b c d
+
+  validate_ipv4 "$ip" || return 1
+  IFS='.' read -r a b c d <<< "$ip"
+  a=$((10#$a))
+  b=$((10#$b))
+  c=$((10#$c))
+  d=$((10#$d))
+
+  # Reject addresses that cannot be used as a public Internet endpoint.
+  (( a == 0 || a == 10 || a == 127 || a >= 224 )) && return 1
+  (( a == 100 && b >= 64 && b <= 127 )) && return 1
+  (( a == 169 && b == 254 )) && return 1
+  (( a == 172 && b >= 16 && b <= 31 )) && return 1
+  (( a == 192 && b == 168 )) && return 1
+  (( a == 198 && (b == 18 || b == 19) )) && return 1
+
+  # Documentation / benchmarking ranges are not valid ACME public endpoints.
+  (( a == 192 && b == 0 && c == 2 )) && return 1
+  (( a == 198 && b == 51 && c == 100 )) && return 1
+  (( a == 203 && b == 0 && c == 113 )) && return 1
+
+  return 0
+}
+
 validate_ip_prefix24() {
   local prefix="$1"
   local first=""
@@ -343,17 +378,17 @@ prompt_server_ip() {
   local default_value="$1"
   local input_value=""
   while true; do
-    if validate_ipv4 "$default_value"; then
+    if validate_public_ipv4 "$default_value"; then
       read -r -p "请输入服务器公网 IP [默认: ${default_value}]: " input_value || true
       input_value="${input_value:-$default_value}"
     else
       read -r -p "请输入服务器公网 IPv4: " input_value || true
     fi
-    if validate_ipv4 "$input_value"; then
+    if validate_public_ipv4 "$input_value"; then
       SERVER_IP="$input_value"
       return 0
     fi
-    warn "IPv4 格式无效，请重新输入，例如 1.2.3.4。"
+    warn "请输入可公网访问的 IPv4；不能使用 127.x、10.x、172.16-31.x、192.168.x、CGNAT 或其它保留地址。"
   done
 }
 
@@ -1459,6 +1494,10 @@ cleanup_acme_nginx_bootstrap() {
 obtain_tls_certificate() {
   local -a args=()
 
+  if validate_ipv4 "$CONTROL_HOST"; then
+    validate_public_ipv4 "$CONTROL_HOST" || die "Headscale HTTPS 控制地址 ${CONTROL_HOST} 不是可公网签发证书的 IPv4，已在 ACME 配置前停止。"
+  fi
+
   install_certbot_runtime
   write_acme_nginx_config
 
@@ -1957,7 +1996,7 @@ main() {
   if [[ "$INSTALL_MODE" == "quick" ]]; then
     if [[ "$EXISTING_INSTALL" -eq 1 ]]; then
       SERVER_IP="${EXISTING_SERVER_IP:-$SERVER_IP_DEFAULT}"
-      if ! validate_ipv4 "$SERVER_IP"; then
+      if ! validate_public_ipv4 "$SERVER_IP"; then
         prompt_server_ip "$SERVER_IP_DEFAULT"
       fi
       DOMAIN="${EXISTING_DERP_HOST:-$SERVER_IP}"
@@ -1969,7 +2008,7 @@ main() {
       PANEL_PATH="${EXISTING_PANEL_PATH:-/web}"
       reinstall_panel=0
     else
-      if validate_ipv4 "$SERVER_IP_DEFAULT"; then
+      if validate_public_ipv4 "$SERVER_IP_DEFAULT"; then
         SERVER_IP="$SERVER_IP_DEFAULT"
       else
         prompt_server_ip ""
@@ -2031,10 +2070,17 @@ main() {
   fi
 
   CONTROL_HOST="${CONTROL_HOST:-$SERVER_IP}"
+  if validate_ipv4 "$CONTROL_HOST" && ! validate_public_ipv4 "$CONTROL_HOST"; then
+    warn "Headscale 控制主机 ${CONTROL_HOST} 不是可签发公网证书的 IPv4，自动改用服务器公网 IP ${SERVER_IP}。"
+    CONTROL_HOST="$SERVER_IP"
+  fi
   CONTROL_URL="https://${CONTROL_HOST}"
-  validate_ipv4 "$SERVER_IP" || die "服务器 IP 格式不正确。"
+  validate_public_ipv4 "$SERVER_IP" || die "服务器 IP 必须是可公网访问的 IPv4，不能使用回环、私网、CGNAT 或保留地址。"
   validate_hostname_or_ipv4 "$DOMAIN" || die "DERP 主机名格式不正确；只允许标准 DNS 主机名或 IPv4 地址。"
   validate_hostname_or_ipv4 "$CONTROL_HOST" || die "Headscale HTTPS 主机格式不正确；只允许标准 DNS 主机名或 IPv4 地址。"
+  if validate_ipv4 "$CONTROL_HOST"; then
+    validate_public_ipv4 "$CONTROL_HOST" || die "Headscale HTTPS IP 必须是可公网签发证书的 IPv4。"
+  fi
   validate_ip_prefix24 "$IP_PREFIX" || die "Tailscale 虚拟内网网段必须是 100.64.0.0/10 内的 /24，例如 100.64.10.0/24；不能使用 10.x、172.16.x 或 192.168.x。"
   validate_port "$HEADSCALE_PORT" || die "Headscale 端口无效。"
   validate_port "$DERP_PORT" || die "DERP 端口无效。"

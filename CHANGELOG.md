@@ -14,6 +14,7 @@
 - HTTPS 迁移采用“先证书与 Nginx 验证，再切 server_url”的顺序；证书或 Nginx 失败时不破坏旧入口
 - ACME 本机探针改为 reload 后重试并降级为诊断提示；challenge location 使用直接 alias，最终以 Certbot/Let's Encrypt 的公网 HTTP-01 验证结果为准
 - 移除新版 Nginx 才支持的 `http2 on;` 指令；Headscale 控制反代保持 HTTP/1.1 Upgrade，兼容 Debian / Ubuntu 自带的较旧 Nginx
+- 修复旧配置可能把 `127.0.0.1` 误继承为公网 Headscale 控制主机的问题；快速模式会忽略回环/私网/CGNAT/保留 IPv4 并回退到检测到的公网 IP，证书申请前再次校验
 - Peer Relay 状态页改为中文可读状态卡片，不再直接显示 `tailscale status` 原始行和空的 `[]`；增加设备路径分类、端点、流量和路径汇总
 - 管理菜单“重启服务”改为选择性重启；Headscale/Nginx 重启前先检查配置，重启后验证服务状态，失败时直接显示状态和日志，不再无条件提示成功
 - Tailscale 虚拟 IPv4 网段校验收紧为 `100.64.0.0/10` 内的 `/24`，并排除 Tailscale 保留网段；已有不受支持网段会停止快速安装并提示迁移
