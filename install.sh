@@ -200,6 +200,7 @@ load_existing_install_defaults() {
   EXISTING_PEER_RELAY_PORT=""
   EXISTING_PANEL_TYPE=""
   EXISTING_PANEL_PATH=""
+  EXISTING_PANEL_INSTALLED=0
 
   if [[ -f "$PANEL_STATE_FILE" ]]; then
     EXISTING_INSTALL=1
@@ -252,14 +253,32 @@ load_existing_install_defaults() {
   fi
   [[ "$EXISTING_PANEL_TYPE" == "headache-ui" ]] && EXISTING_PANEL_TYPE="headscale-ui"
   if [[ -z "$EXISTING_PANEL_TYPE" ]]; then
-    if [[ -f "$HEADPLANE_SERVICE" || -f "$HEADPLANE_CONFIG" ]]; then
+    if [[ -f "$HEADPLANE_SERVICE" || -f "$HEADPLANE_CONFIG" || -d "$HEADPLANE_DIR" ]]; then
       EXISTING_PANEL_TYPE="headplane"
       EXISTING_PANEL_PATH="/admin"
+    elif [[ -f "$HEADSCALE_UI_DIR/index.html" ]]; then
+      EXISTING_PANEL_TYPE="headscale-ui"
+      EXISTING_PANEL_PATH="/web"
     else
+      # Partial installs may already have Headscale/DERP but no panel yet.
+      # Keep headscale-ui as the default choice, but do not mark it installed.
       EXISTING_PANEL_TYPE="headscale-ui"
       EXISTING_PANEL_PATH="/web"
     fi
   fi
+
+  case "$EXISTING_PANEL_TYPE" in
+    headplane)
+      if [[ -f "$HEADPLANE_SERVICE" && -f "$HEADPLANE_CONFIG" && -d "$HEADPLANE_DIR" ]]; then
+        EXISTING_PANEL_INSTALLED=1
+      fi
+      ;;
+    headscale-ui)
+      if [[ -f "$HEADSCALE_UI_DIR/index.html" ]]; then
+        EXISTING_PANEL_INSTALLED=1
+      fi
+      ;;
+  esac
 
   if [[ "$EXISTING_INSTALL" -eq 1 ]]; then
     info "检测到已有 Headscale One Click 安装，快速模式将尽量继承现有 IP、端口和面板设置。"
@@ -2155,7 +2174,12 @@ main() {
       PEER_RELAY_DEFAULT_PORT="${EXISTING_PEER_RELAY_PORT:-40000}"
       PANEL_TYPE="${EXISTING_PANEL_TYPE:-headscale-ui}"
       PANEL_PATH="${EXISTING_PANEL_PATH:-/web}"
-      reinstall_panel=0
+      if [[ "${EXISTING_PANEL_INSTALLED:-0}" -eq 1 ]]; then
+        reinstall_panel=0
+      else
+        reinstall_panel=1
+        warn "检测到已有/部分安装，但 ${PANEL_TYPE} 面板文件不完整或不存在；本次将自动补装面板。"
+      fi
     else
       if validate_public_ipv4 "$SERVER_IP_DEFAULT"; then
         SERVER_IP="$SERVER_IP_DEFAULT"
