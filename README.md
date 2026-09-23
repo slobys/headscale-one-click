@@ -4,49 +4,21 @@
 
 当前版本面向 Headscale `0.29.x` 与较新的 Tailscale 客户端：DERP 使用官方 `derper`，通过自签名证书 SHA256 指纹固定工作，不再修改 Tailscale 源码；连接路径可形成 **DIRECT -> Peer Relay -> DERP** 三层兜底。
 
-## 快速安装
+## 快速使用
 
-使用 root 用户执行：
-
-```bash
-curl -L --connect-timeout 15 https://cdn.jsdelivr.net/gh/slobys/headscale-one-click@main/bootstrap.sh -o /tmp/hs-bootstrap.sh && bash /tmp/hs-bootstrap.sh
-```
-
-这条命令会自动：
-
-- 拉取 / 更新项目到 `/root/headscale-one-click`
-- 补齐脚本执行权限
-- 安装快捷菜单命令 `hs`
-- 启动交互式安装
-
-安装完成后，随时输入下面命令打开管理菜单：
+项目以后以 **`hs` 管理菜单**作为主要入口。已经完成初始化 / 安装的服务器，使用 root 用户直接执行：
 
 ```bash
 hs
 ```
 
-菜单还提供：
+通过 `hs` 可以统一完成安装、更新、卸载、服务状态检查、服务重启、修复、上游版本检查、Peer Relay 管理，以及查看当前安装信息和设备连接路径。
 
-```text
-10. 查看安装信息
-11. 查看设备连接路径
-```
+其中“查看安装信息”可以重新显示管理面板地址、客户端加入命令、DERP / Peer Relay 端口等信息；“查看设备连接路径”会从当前机器的 `tailscale status` 判断活跃连接是 **P2P 直连、Peer Relay 还是 DERP**。
 
-“查看安装信息”会重新显示安装结束时容易丢失的管理面板地址、客户端加入命令、DERP 端口和 Peer Relay 信息；旧版本部署后即使 `panel.env` 没保存完整字段，也会尝试从现有 Headscale 和 systemd 配置中自动恢复。
+首次部署时只需要完成一次项目初始化，初始化过程会自动创建 `/usr/local/bin/hs`。之后日常安装、升级、维护和排障都建议直接从 `hs` 菜单进入，不需要再记安装脚本路径或长 `curl` 命令。
 
-“查看设备连接路径”会从当前机器的 `tailscale status` 判断每个活跃连接是 **P2P 直连、Peer Relay 还是 DERP**。连接路径是点到点状态，并不是某台设备永久固定使用一种方式。
-
-如果只想打开菜单，不直接安装：
-
-```bash
-curl -L --connect-timeout 15 https://cdn.jsdelivr.net/gh/slobys/headscale-one-click@main/bootstrap.sh -o /tmp/hs-bootstrap.sh && bash /tmp/hs-bootstrap.sh --menu
-```
-
-如果 GitHub Release 下载很慢，可以临时指定自己的加速前缀：
-
-```bash
-GITHUB_PROXY_PREFIX=https://ghfast.top bash /tmp/hs-bootstrap.sh
-```
+如果执行 `hs` 提示命令不存在，说明当前服务器还没有完成项目初始化。
 
 ## 中国大陆 VPS 下载策略
 
