@@ -18,6 +18,7 @@
 - Nginx HTTPS 切换后不再立即单次探测 443；reload 后等待实际 listener，未生效则自动 restart，再重试 `/health`，失败时输出监听状态和最近日志后回滚
 - Headscale 切换 `server_url` 后不再立即单次探测 `127.0.0.1:18080`；restart 后等待实际 listener 并重试 `/health`，真正失败时输出状态/日志后回滚
 - API Key 体验优化：全新安装会醒目输出新 Key；已有安装会询问是否新建；`hs` 菜单新增“创建 Headscale API Key”。完整 Key 只在创建时显示一次
+- 修复全新安装无旧兼容端口时 `configure_nginx` 最后一条条件判断返回 1，导致 Nginx 已成功却被 `set -e` 误判为安装失败的问题
 - Peer Relay 状态页改为中文可读状态卡片，不再直接显示 `tailscale status` 原始行和空的 `[]`；增加设备路径分类、端点、流量和路径汇总
 - 管理菜单“重启服务”改为选择性重启；Headscale/Nginx 重启前先检查配置，重启后验证服务状态，失败时直接显示状态和日志，不再无条件提示成功
 - Tailscale 虚拟 IPv4 网段校验收紧为 `100.64.0.0/10` 内的 `/24`，并排除 Tailscale 保留网段；已有不受支持网段会停止快速安装并提示迁移

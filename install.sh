@@ -1834,7 +1834,10 @@ configure_nginx() {
 
   install_certbot_renewal_timer
   success "Nginx HTTPS 443 配置完成。"
-  [[ -n "$LEGACY_HEADSCALE_PORT" && "$LEGACY_HEADSCALE_PORT" != "443" ]] && warn "旧 HTTP ${LEGACY_HEADSCALE_PORT}/tcp 暂作为兼容入口保留；新客户端请统一使用 ${CONTROL_URL}。"
+  if [[ -n "$LEGACY_HEADSCALE_PORT" && "$LEGACY_HEADSCALE_PORT" != "443" ]]; then
+    warn "旧 HTTP ${LEGACY_HEADSCALE_PORT}/tcp 暂作为兼容入口保留；新客户端请统一使用 ${CONTROL_URL}。"
+  fi
+  return 0
 }
 
 switch_headscale_server_url() {
