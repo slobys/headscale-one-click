@@ -4,13 +4,19 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to upload assets to
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 env:
   TAILSCALE_VERSION: "1.102.4"
-  GO_VERSION: "1.26.3"
+  GO_VERSION: "1.26.6"
 
 jobs:
   build-and-upload:
@@ -20,6 +26,7 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
+          cache: false
 
       - name: Build derper binaries
         shell: bash
@@ -40,7 +47,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
         run: |
           set -Eeuo pipefail
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
