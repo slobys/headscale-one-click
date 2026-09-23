@@ -6,6 +6,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
+DERPER_TAILSCALE_VERSION="1.102.4"
 
 info() { echo -e "${BLUE}[INFO]${NC} $*"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
@@ -21,10 +22,6 @@ require_cmd() {
 
 curl_quick() {
   curl -fsSL --connect-timeout 15 --max-time 45 "$@"
-}
-
-fetch_latest_go() {
-  curl_quick https://golang.google.cn/VERSION?m=text | head -n 1 | sed 's/^go//'
 }
 
 fetch_latest_headscale() {
@@ -57,14 +54,12 @@ main() {
 
   info "检查上游最新版本..."
 
-  local go_version="unknown"
   local tailscale_version="unknown"
   local headscale_version="unknown"
   local headscale_ui_version="unknown"
   local headplane_version="unknown"
   local node22_version="unknown"
 
-  go_version="$(fetch_latest_go 2>/dev/null || echo unknown)"
   tailscale_version="$(fetch_latest_tailscale 2>/dev/null || echo unknown)"
   headscale_version="$(fetch_latest_headscale 2>/dev/null || echo unknown)"
   headscale_ui_version="$(fetch_latest_headscale_ui 2>/dev/null || echo unknown)"
@@ -73,8 +68,8 @@ main() {
 
   echo
   echo "当前建议关注的上游最新版本："
-  echo "- Go:              ${go_version}"
-  echo "- Tailscale DERP:  ${tailscale_version}"
+  echo "- Tailscale:       ${tailscale_version}"
+  echo "- DERP build:      pinned ${DERPER_TAILSCALE_VERSION} in release workflow"
   echo "- Headscale:       ${headscale_version}"
   echo "- Headscale-ui:    ${headscale_ui_version}"
   echo "- Headplane:       ${headplane_version}"

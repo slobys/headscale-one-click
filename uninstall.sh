@@ -36,6 +36,7 @@ load_panel_state() {
     source "$PANEL_STATE_FILE"
   fi
   [[ "$PANEL_TYPE" == "headache-ui" ]] && PANEL_TYPE="headscale-ui"
+  return 0
 }
 
 load_panel_state
@@ -51,7 +52,6 @@ cat <<EOF
 
 注意：
 - 不会自动删除 Tailscale 客户端
-- 不会自动删除 Go 环境
 - 不会删除或修改你自己的 Headscale policy
 - 不会自动清空你系统其它业务文件
 EOF

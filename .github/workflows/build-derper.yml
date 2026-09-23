@@ -1,0 +1,54 @@
+name: Build DERP release assets
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  TAILSCALE_VERSION: "1.102.4"
+  GO_VERSION: "1.26.3"
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Build derper binaries
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p assets
+          for arch in amd64 arm64; do
+            out_dir="$PWD/build-$arch"
+            mkdir -p "$out_dir"
+            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" GOBIN="$out_dir" \
+              go install "tailscale.com/cmd/derper@v${TAILSCALE_VERSION}"
+            install -m 0755 "$out_dir/derper" "assets/derper-linux-$arch"
+            (cd assets && sha256sum "derper-linux-$arch" > "derper-linux-$arch.sha256")
+          done
+          ls -lh assets
+
+      - name: Create draft release and upload DERP assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -Eeuo pipefail
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" assets/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$RELEASE_TAG" assets/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --draft \
+              --title "$RELEASE_TAG" \
+              --notes "Precompiled DERP assets generated automatically for $RELEASE_TAG."
+          fi

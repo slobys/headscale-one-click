@@ -34,6 +34,7 @@ load_panel_state() {
     source "$PANEL_STATE_FILE"
   fi
   [[ "$PANEL_TYPE" == "headache-ui" ]] && PANEL_TYPE="headscale-ui"
+  return 0
 }
 
 find_or_download_file() {
@@ -126,9 +127,9 @@ cat <<EOF
 - 重启 headscale / nginx / derp
 
 注意：
-- 当前版本不会自动升级 Go
 - 当前版本不会自动升级 Tailscale 客户端
 - 当前版本不会自动替你切换 Headscale 大版本
+- v2.3.0 起目标服务器已不依赖 Go
 EOF
 
 read -r -p "是否继续执行更新流程？[y/N]: " answer
@@ -173,15 +174,26 @@ if [[ "$PANEL_TYPE" == "headplane" ]]; then
   popd >/dev/null
 
   mv "$HEADPLANE_DIR" "$backup_dir"
-  mv "$staging_dir" "$HEADPLANE_DIR"
-  rm -rf "$backup_dir"
+  if ! mv "$staging_dir" "$HEADPLANE_DIR"; then
+    mv "$backup_dir" "$HEADPLANE_DIR"
+    die "Headplane 新版本目录替换失败，已恢复旧版本。"
+  fi
 
   if [[ -f "$HEADPLANE_SERVICE" ]]; then
     systemctl daemon-reload
-    systemctl restart headplane
+    if ! systemctl restart headplane || ! systemctl is-active --quiet headplane; then
+      warn "新版 Headplane 启动失败，正在自动回滚..."
+      systemctl stop headplane 2>/dev/null || true
+      rm -rf "$HEADPLANE_DIR"
+      mv "$backup_dir" "$HEADPLANE_DIR"
+      systemctl daemon-reload
+      systemctl restart headplane 2>/dev/null || true
+      die "Headplane 更新失败，已恢复旧版本。"
+    fi
   fi
 
-  success "Headplane 更新完成。"
+  rm -rf "$backup_dir"
+  success "Headplane 更新完成并通过服务检查。"
 else
   HEADSCALE_UI_LATEST_VERSION="$(fetch_latest_headscale_ui 2>/dev/null || echo unknown)"
   prompt_version_value HEADSCALE_UI_VERSION "Headscale-ui" "$HEADSCALE_UI_LATEST_VERSION" "$HEADSCALE_UI_FALLBACK_VERSION"
@@ -192,8 +204,26 @@ else
   mkdir -p "$WORKDIR"
   mapfile -t download_urls < <(github_download_urls "$UI_URL")
   find_or_download_file "$UI_ZIP" "$WORKDIR/${UI_ZIP}" "${download_urls[@]}"
-  rm -rf "$HEADSCALE_UI_DIR"
-  unzip -o "$WORKDIR/${UI_ZIP}" -d /var/www >/dev/null
+
+  ui_staging="${WORKDIR}/headscale-ui-stage.$$"
+  ui_backup="${HEADSCALE_UI_DIR}.bak.$(date +%s)"
+  rm -rf "$ui_staging" "$ui_backup"
+  mkdir -p "$ui_staging"
+  unzip -o "$WORKDIR/${UI_ZIP}" -d "$ui_staging" >/dev/null
+  [[ -f "$ui_staging/web/index.html" ]] || die "Headscale-ui 压缩包解压后未找到 web/index.html，未修改当前版本。"
+
+  if [[ -d "$HEADSCALE_UI_DIR" ]]; then
+    mv "$HEADSCALE_UI_DIR" "$ui_backup"
+  fi
+  if mv "$ui_staging/web" "$HEADSCALE_UI_DIR"; then
+    rm -rf "$ui_staging" "$ui_backup"
+  else
+    warn "Headscale-ui 新版本目录替换失败，正在恢复旧版本。"
+    rm -rf "$HEADSCALE_UI_DIR"
+    [[ -d "$ui_backup" ]] && mv "$ui_backup" "$HEADSCALE_UI_DIR"
+    rm -rf "$ui_staging"
+    die "Headscale-ui 更新失败，已恢复旧版本。"
+  fi
   success "Headscale Web UI 更新完成。"
 fi
 
@@ -203,9 +233,6 @@ if [[ -f "$NGINX_CONF" || -f "$NGINX_FALLBACK_CONF" ]]; then
   systemctl restart nginx
 fi
 
-systemctl restart headscale 2>/dev/null || true
-systemctl restart derp 2>/dev/null || true
-systemctl restart headplane 2>/dev/null || true
-
 success "更新流程执行完成。"
-warn "如果你后续要升级 Headscale 本体版本，建议先手动备份配置，再单独做版本更新。"
+warn "本更新流程只更新当前管理面板和相关 Nginx 配置，不再无必要重启 Headscale / DERP。"
+warn "如果你后续要升级 Headscale 本体版本，请使用安装脚本中的安全升级流程。"

@@ -85,58 +85,72 @@ tailscale_1.102.4_amd64.tgz.sha256
 
 - 一台有公网 IP 的服务器
 - 已放行所需端口的云安全组 / 防火墙
-- 一个域名更佳，没有域名也可以先用公网 IP 测试
+- 域名不是必需；默认可以直接使用服务器公网 IPv4
 
-建议放行这些端口：
+建议根据安装结束时显示的实际值放行这些端口：
 
 - `22/tcp`：SSH
 - `80/tcp`、`443/tcp`：如后续接入 HTTP / HTTPS 反代
-- Headscale 对外端口，默认 `8080`
-- DERP 服务端口，默认 `12345/tcp`
-- DERP HTTP 端口，默认 `3340`
-- `3478/udp`：DERP/STUN，用于 NAT 探测
-- Peer Relay UDP 端口，启用时默认 `40000/udp`
+- Headscale 对外 TCP：**首次安装随机生成一次**
+- DERP TCP：**首次安装随机生成一次**
+- `3478/udp`：DERP/STUN，保持固定以提高网络兼容性
+- Peer Relay UDP：**首次安装随机生成并保存默认值**，实际启用 Peer Relay 时再放行
 
 如果公网访问不了，但服务器本机能访问，优先检查云平台安全组。
 
 ## 没有域名怎么办
 
-只是测试时，可以在安装提示里把“域名”和“服务器 IP”都填服务器公网 IP。
+v2.3.0 开始，**快速安装会自动把检测到的公网 IPv4 同时作为 DERP 主机名**，无需提前购买域名或配置 DNS。
 
-例如：
+例如检测到：
 
 ```text
 1.2.3.4
 ```
 
-这样可以先通过 HTTP 跑起来：
+脚本会默认使用：
 
 ```text
-http://1.2.3.4:8080/web
+服务器 IP：1.2.3.4
+DERP 主机名：1.2.3.4
 ```
 
-长期使用仍然建议准备一个域名。DERP、HTTPS 证书和客户端连接稳定性都更适合使用域名。
+管理面板可以先通过 HTTP 使用：
 
-## 安装时会问什么
+```text
+http://1.2.3.4:<安装时生成的Headscale端口>/web
+```
 
-脚本会按提示询问：
+如果后续要做正式 HTTPS 443 部署，再准备域名即可。
 
-- 是否执行系统升级
-- 域名
-- 服务器 IP
-- Headscale 端口，默认 `8080`
+## 安装模式
+
+v2.3.0 会先执行 Preflight 环境检查，再让你选择：
+
+```text
+1. 快速安装（推荐）
+2. 高级安装
+```
+
+快速安装会自动使用已验证版本和 Headscale-ui；新服务器默认直接使用公网 IP 作为 DERP 主机名，并为 Headscale TCP、DERP TCP、Peer Relay UDP **随机生成一次未占用端口**。这些端口会写入状态文件，以后升级、重启继续复用。已经部署过本项目的服务器会继承原来的 IP、端口和面板设置，不会因为升级突然更换端口。
+
+高级安装可以自定义：
+
+- 服务器公网 IP
+- DERP 主机名（无域名可直接填公网 IP）
+- Headscale 端口，默认提供一个未占用随机值
 - IP 前缀，默认 `100.64.0.0`
-- DERP 服务端口，默认 `12345`
-- DERP HTTP 端口，默认 `3340`
-- Go 版本，默认使用上游最新版本，可手动输入旧版本
-- Tailscale DERP 版本，默认使用上游最新稳定版本，可手动输入旧版本
-- Headscale 版本，默认使用上游最新版本，可手动输入旧版本
-- 管理面板类型
-- Headscale-ui 或 Headplane 版本，默认使用上游最新版本，可手动输入旧版本
+- DERP 服务端口，默认提供一个不同的未占用随机值
+- Peer Relay 默认 UDP 端口，默认提供一个未占用随机值
+- Tailscale 客户端版本
+- Headscale 版本
+- 管理面板及其版本
 
-一般情况下直接回车使用默认值即可。
+DERP 的额外 HTTP listener 默认关闭，不再要求输入或放行 `3340/tcp`。目标 VPS 也不再安装 Go。
 
-Tailscale 客户端默认与所选 DERP/Tailscale 版本保持一致；如果服务器上已经安装了相同或更新版本，则直接复用。
+随机端口只在**首次安装**生成一次，并会主动避开常见端口、当前已监听端口和 Linux 临时端口范围。随机端口可以减少默认端口被批量扫描产生的噪声，但它不是核心安全机制，仍需要依赖 Headscale 身份认证、DERP `/verify`、Peer Relay Grant、云安全组以及后续 HTTPS。
+
+Tailscale 客户端和 DERP 已拆分管理：Tailscale 客户端可使用所选版本；DERP 使用项目 Release 中预编译、已校验的固定测试版本。如果服务器已经安装了相同或更新的 Tailscale 客户端，则直接复用。
 
 系统升级会执行 `apt upgrade -y`。新服务器可以执行；已经跑业务的服务器建议先跳过。
 
@@ -150,11 +164,13 @@ Tailscale 客户端默认与所选 DERP/Tailscale 版本保持一致；如果服
 http://服务器IP:Headscale端口/web
 ```
 
-示例：
+例如安装时生成的 Headscale 端口为 `25678`：
 
 ```text
-http://1.2.3.4:8080/web
+http://1.2.3.4:25678/web
 ```
+
+实际端口以安装摘要或 `hs -> 10. 查看安装信息` 为准。
 
 客户端首次接入（Windows / Linux / macOS 均可指定自定义控制服务器）：
 
@@ -162,16 +178,16 @@ http://1.2.3.4:8080/web
 tailscale login --login-server=http://服务器IP:Headscale端口
 ```
 
-示例：
+例如安装时生成的 Headscale 端口为 `25678`：
 
 ```bash
-tailscale login --login-server=http://1.2.3.4:8080
+tailscale login --login-server=http://1.2.3.4:25678
 ```
 
 Windows 如果 PowerShell 找不到 `tailscale` 命令，可使用：
 
 ```powershell
-& "C:\\Program Files\\Tailscale\\tailscale.exe" login --login-server=http://1.2.3.4:8080
+& "C:\\Program Files\\Tailscale\\tailscale.exe" login --login-server=http://1.2.3.4:25678
 ```
 
 执行后会打开 Headscale 的注册页面；按照页面给出的 Auth ID，在服务器端完成批准后，Windows 客户端就会加入你的 Headscale 网络。
@@ -179,29 +195,39 @@ Windows 如果 PowerShell 找不到 `tailscale` 命令，可使用：
 如果需要接收子网路由：
 
 ```bash
-tailscale up --login-server=http://1.2.3.4:8080 --accept-routes=true
+tailscale up --login-server=http://1.2.3.4:25678 --accept-routes=true
 ```
 
 如果需要发布子网路由：
 
 ```bash
-tailscale up --login-server=http://1.2.3.4:8080 --accept-routes=true --accept-dns=false --advertise-routes=192.168.2.0/24 --reset
+tailscale up --login-server=http://1.2.3.4:25678 --accept-routes=true --accept-dns=false --advertise-routes=192.168.2.0/24 --reset
 ```
 
 ## DERP 工作方式
 
-新版不再修改 `cmd/derper/cert.go`，而是直接编译官方稳定版 `derper`。
+v2.3.0 起，目标服务器**不再安装 Go，也不再现场编译 derper**。项目 Release 会通过 GitHub Actions 生成：
 
-脚本会：
+```text
+derper-linux-amd64
+derper-linux-amd64.sha256
+derper-linux-arm64
+derper-linux-arm64.sha256
+```
 
-- 生成带正确 IP/DNS SAN 的自签名证书
+脚本优先使用 `/root/` 或当前目录中的本地文件，没有时再从项目 Release 多线路下载，并在执行前强制校验 SHA256。
+
+脚本还会：
+
+- 生成或复用带正确 IP/DNS SAN 的自签名证书
 - 计算证书 DER SHA256 指纹
 - 在 `/etc/headscale/derp.yaml` 中写入 `certname: sha256-raw:<指纹>`
-- 让 Headscale 直接从本地文件加载 DERP Map，不再通过 Nginx 暴露 `/var/www/derp.json`
+- 让 Headscale 直接从本地文件加载 DERP Map
 - 显式启用 STUN `3478/udp`
-- 安装时默认建议启用 Headscale `/verify` 接口校验 DERP 客户端，并设置 fail-closed；也可以在提示时选择跳过
+- 关闭额外 DERP HTTP listener（`-http-port -1`）
+- 安装时默认建议启用 Headscale `/verify` 接口校验 DERP 客户端，并设置 fail-closed
 
-因此现在无需魔改 Tailscale 源码，也无需 `InsecureForTests`。
+因此目标 VPS 不需要 Go、GOPROXY 或编译环境，也无需 `InsecureForTests`。
 
 使用自签名 DERP 证书指纹固定的客户端建议使用 Tailscale `1.82+`；如果要参与 Peer Relay，则需要 `1.86+`。
 
@@ -259,7 +285,7 @@ Peer Relay 并不会替代 DERP；DERP 仍然是最终兜底。
 
 ## 版本策略
 
-脚本安装时会查询上游 latest，直接回车默认使用最新版；网络查询失败时使用项目内已验证的 fallback 版本。
+快速安装默认使用项目内已验证的稳定版本；高级安装会查询上游 latest，并允许手动选择旧版本。网络查询失败时自动使用项目内 fallback。DERP 本体固定使用 Release 中经过项目测试的预编译版本。
 
 Headscale 升级属于数据库迁移操作，脚本不会允许 minor 降级或跨 minor 跳级。已有 Headscale 环境在安装新版本前会自动备份；修改配置后会先执行 `headscale configtest`，通过后才启动服务。
 

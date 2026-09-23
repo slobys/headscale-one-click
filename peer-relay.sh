@@ -6,6 +6,7 @@ PEER_RELAY_STATE_FILE="/etc/headscale-one-click/peer-relay.env"
 HEADSCALE_CONFIG="/etc/headscale/config.yaml"
 GRANT_SNIPPET_FILE="/etc/headscale-one-click/peer-relay-grant.hujson"
 DEFAULT_PORT="40000"
+CURRENT_RELAY_PORT=""
 
 RED=$'\033[0;31m'
 GREEN=$'\033[0;32m'
@@ -37,6 +38,12 @@ validate_port() {
   (( port >= 1 && port <= 65535 ))
 }
 
+udp_port_in_use() {
+  local port="$1"
+  command -v ss >/dev/null 2>&1 || return 1
+  ss -lunH 2>/dev/null | awk '{print $4}' | grep -Eq "(^|:)$port$"
+}
+
 validate_policy_selector() {
   local selector="$1"
   [[ "$selector" =~ ^[A-Za-z0-9_.*:@/+\-]+$ ]]
@@ -59,10 +66,20 @@ load_state() {
   SERVER_IP=""
   HEADSCALE_PORT="8080"
   HEADSCALE_INTERNAL_PORT="18080"
+  PEER_RELAY_DEFAULT_PORT="40000"
+  CURRENT_RELAY_PORT=""
   if [[ -f "$PANEL_STATE_FILE" ]]; then
     # shellcheck disable=SC1090
     source "$PANEL_STATE_FILE"
   fi
+  DEFAULT_PORT="${PEER_RELAY_DEFAULT_PORT:-40000}"
+  if [[ -f "$PEER_RELAY_STATE_FILE" ]]; then
+    # shellcheck disable=SC1090
+    source "$PEER_RELAY_STATE_FILE"
+    CURRENT_RELAY_PORT="${PEER_RELAY_PORT:-}"
+    [[ -n "$CURRENT_RELAY_PORT" ]] && DEFAULT_PORT="$CURRENT_RELAY_PORT"
+  fi
+  return 0
 }
 
 headscale_server_url() {
@@ -242,6 +259,9 @@ enable_relay() {
   read -r -p "Peer Relay UDP 端口 [默认: ${DEFAULT_PORT}]: " port || true
   port="${port:-$DEFAULT_PORT}"
   validate_port "$port" || die "无效端口：${port}"
+  if udp_port_in_use "$port" && [[ "$port" != "$CURRENT_RELAY_PORT" ]]; then
+    die "UDP ${port} 已被其它程序占用，请换一个端口。"
+  fi
 
   public_ip="$(detect_public_ip || true)"
   if [[ -n "$public_ip" ]]; then

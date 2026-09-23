@@ -77,9 +77,27 @@ download_archive() {
   for url in "$REPO_ARCHIVE_MIRROR_URL" "$REPO_ARCHIVE_URL"; do
     info "尝试下载项目源码包：${url}"
     if run_with_timeout curl -fL --connect-timeout 15 --retry 2 --retry-delay 2 "$url" -o "$tmp_file"; then
+      local extracted_dir=""
+      local backup_dir="${INSTALL_DIR}.bootstrap-backup.$$"
       tar -xzf "$tmp_file" -C "$tmp_dir"
-      rm -rf "$INSTALL_DIR"
-      mv "$tmp_dir"/headscale-one-click-* "$INSTALL_DIR"
+      extracted_dir="$(find "$tmp_dir" -mindepth 1 -maxdepth 1 -type d -name 'headscale-one-click-*' | head -n 1)"
+      [[ -n "$extracted_dir" && -d "$extracted_dir" ]] || die "源码包解压后未找到项目目录。"
+
+      rm -rf "$backup_dir"
+      if [[ -e "$INSTALL_DIR" ]]; then
+        mv "$INSTALL_DIR" "$backup_dir"
+      fi
+      if mv "$extracted_dir" "$INSTALL_DIR"; then
+        rm -rf "$backup_dir"
+      else
+        warn "新项目目录替换失败，正在恢复旧目录。"
+        rm -rf "$INSTALL_DIR"
+        [[ -e "$backup_dir" ]] && mv "$backup_dir" "$INSTALL_DIR"
+        rm -f "$tmp_file"
+        rm -rf "$tmp_dir"
+        return 1
+      fi
+
       rm -f "$tmp_file"
       rm -rf "$tmp_dir"
       success "已通过源码包安装项目：${INSTALL_DIR}"

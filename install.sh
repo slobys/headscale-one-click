@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-SCRIPT_VERSION="2.2.0"
+SCRIPT_VERSION="2.3.0"
+PROJECT_REPO="slobys/headscale-one-click"
 WORKDIR="/usr/local/src/headscale-one-click"
 DERP_DIR="/etc/derp"
 DERP_SERVICE="/etc/systemd/system/derp.service"
@@ -12,8 +13,8 @@ NGINX_ENABLED="/etc/nginx/sites-enabled/${NGINX_SITE_NAME}.conf"
 HEADSCALE_CONFIG="/etc/headscale/config.yaml"
 HEADSCALE_UI_DIR="/var/www/web"
 HEADSCALE_INTERNAL_PORT="18080"
-GO_FALLBACK_VERSION="1.26.3"
 TAILSCALE_FALLBACK_VERSION="1.102.4"
+DERPER_TAILSCALE_VERSION="1.102.4"
 HEADSCALE_FALLBACK_VERSION="0.29.3"
 HEADSCALE_UI_FALLBACK_VERSION="2026.03.17"
 HEADPLANE_FALLBACK_VERSION="0.7.1"
@@ -21,6 +22,9 @@ NODE_FALLBACK_VERSION="22.23.2"
 HEADSCALE_UI_VERSION="${HEADSCALE_UI_FALLBACK_VERSION}"
 PANEL_STATE_DIR="/etc/headscale-one-click"
 PANEL_STATE_FILE="${PANEL_STATE_DIR}/panel.env"
+PEER_RELAY_STATE_FILE="${PANEL_STATE_DIR}/peer-relay.env"
+RANDOM_PORT_MIN=20000
+RANDOM_PORT_MAX=64999
 HEADPLANE_DIR="/opt/headplane"
 HEADPLANE_CONFIG_DIR="/etc/headplane"
 HEADPLANE_CONFIG="${HEADPLANE_CONFIG_DIR}/config.yaml"
@@ -28,6 +32,8 @@ HEADPLANE_SERVICE="/etc/systemd/system/headplane.service"
 HEADPLANE_DATA_DIR="/var/lib/headplane"
 HEADPLANE_PORT="3000"
 HEADPLANE_NODE_BIN="/usr/bin/node"
+APT_UPDATED=0
+INSTALL_MODE="quick"
 
 RED=$'\033[0;31m'
 GREEN=$'\033[0;32m'
@@ -96,10 +102,6 @@ curl_quick() {
   curl -fsSL --connect-timeout 15 --max-time 45 "$@"
 }
 
-fetch_latest_go() {
-  curl_quick https://golang.google.cn/VERSION?m=text | head -n 1 | sed 's/^go//'
-}
-
 fetch_latest_headscale() {
   curl_quick https://api.github.com/repos/juanfont/headscale/releases/latest | grep '"tag_name"' | head -n 1 | sed -E 's/.*"v?([^"]+)".*/\1/'
 }
@@ -124,23 +126,118 @@ fetch_latest_node22() {
 }
 
 detect_latest_versions() {
-  info "查询 Go / Tailscale DERP / Headscale / Headscale-ui / Headplane 最新版本..."
-  GO_LATEST_VERSION="$(fetch_latest_go 2>/dev/null || echo unknown)"
+  info "查询 Tailscale / Headscale / Headscale-ui / Headplane 最新版本..."
   TAILSCALE_LATEST_VERSION="$(fetch_latest_tailscale 2>/dev/null || echo unknown)"
   HEADSCALE_LATEST_VERSION="$(fetch_latest_headscale 2>/dev/null || echo unknown)"
   HEADSCALE_UI_LATEST_VERSION="$(fetch_latest_headscale_ui 2>/dev/null || echo unknown)"
   HEADPLANE_LATEST_VERSION="$(fetch_latest_headplane 2>/dev/null || echo unknown)"
 }
 
+apt_update_once() {
+  if [[ "$APT_UPDATED" -eq 0 ]]; then
+    apt update
+    APT_UPDATED=1
+  fi
+}
+
+install_preflight_tools() {
+  local -a packages=(ca-certificates curl tar xz-utils openssl iproute2 coreutils grep sed gawk)
+  local cmd=""
+  local missing=0
+
+  for cmd in curl tar xz openssl ss sha256sum grep sed awk; do
+    command -v "$cmd" >/dev/null 2>&1 || missing=1
+  done
+  [[ "$missing" -eq 0 ]] && return 0
+
+  info "安装环境检查所需的最小工具..."
+  command -v apt >/dev/null 2>&1 || die "当前系统缺少 apt，无法自动安装基础工具。"
+  apt_update_once
+  DEBIAN_FRONTEND=noninteractive apt install -y "${packages[@]}"
+}
+
+prompt_install_mode() {
+  local choice=""
+  echo
+  echo "请选择安装模式："
+  echo "1) 快速安装（推荐：稳定版本、推荐端口、Headscale-ui）"
+  echo "2) 高级安装（自定义版本、端口和面板）"
+  read -r -p "请输入选项 [默认: 1]: " choice || true
+  choice="${choice:-1}"
+  case "$choice" in
+    1) INSTALL_MODE="quick" ;;
+    2) INSTALL_MODE="advanced" ;;
+    *) die "无效的安装模式：${choice}" ;;
+  esac
+}
+
+load_existing_install_defaults() {
+  EXISTING_INSTALL=0
+  EXISTING_SERVER_IP=""
+  EXISTING_HEADSCALE_PORT=""
+  EXISTING_DERP_HOST=""
+  EXISTING_DERP_PORT=""
+  EXISTING_IP_PREFIX=""
+  EXISTING_PEER_RELAY_PORT=""
+  EXISTING_PANEL_TYPE=""
+  EXISTING_PANEL_PATH=""
+
+  if [[ -f "$PANEL_STATE_FILE" ]]; then
+    EXISTING_INSTALL=1
+    EXISTING_SERVER_IP="$(sed -n 's/^SERVER_IP=//p' "$PANEL_STATE_FILE" | head -n 1)"
+    EXISTING_HEADSCALE_PORT="$(sed -n 's/^HEADSCALE_PORT=//p' "$PANEL_STATE_FILE" | head -n 1)"
+    EXISTING_DERP_HOST="$(sed -n 's/^DERP_HOST=//p' "$PANEL_STATE_FILE" | head -n 1)"
+    EXISTING_DERP_PORT="$(sed -n 's/^DERP_PORT=//p' "$PANEL_STATE_FILE" | head -n 1)"
+    EXISTING_IP_PREFIX="$(sed -n 's/^IP_PREFIX=//p' "$PANEL_STATE_FILE" | head -n 1)"
+    EXISTING_PEER_RELAY_PORT="$(sed -n 's/^PEER_RELAY_DEFAULT_PORT=//p' "$PANEL_STATE_FILE" | head -n 1)"
+    EXISTING_PANEL_TYPE="$(sed -n 's/^PANEL_TYPE=//p' "$PANEL_STATE_FILE" | head -n 1)"
+    EXISTING_PANEL_PATH="$(sed -n 's/^PANEL_PATH=//p' "$PANEL_STATE_FILE" | head -n 1)"
+  elif [[ -f "$HEADSCALE_CONFIG" || -f "$DERP_SERVICE" ]]; then
+    EXISTING_INSTALL=1
+  fi
+
+  if [[ -z "$EXISTING_HEADSCALE_PORT" && -f "$HEADSCALE_CONFIG" ]]; then
+    EXISTING_HEADSCALE_PORT="$(sed -nE 's|^server_url:[[:space:]]*http://[^:]+:([0-9]+).*|\1|p' "$HEADSCALE_CONFIG" | head -n 1)"
+  fi
+  if [[ -z "$EXISTING_SERVER_IP" && -f "$HEADSCALE_CONFIG" ]]; then
+    EXISTING_SERVER_IP="$(sed -nE 's|^server_url:[[:space:]]*http://([^:/]+).*|\1|p' "$HEADSCALE_CONFIG" | head -n 1)"
+  fi
+  if [[ -f "$DERP_SERVICE" ]]; then
+    [[ -n "$EXISTING_DERP_HOST" ]] || EXISTING_DERP_HOST="$(sed -nE 's/.*-hostname[ =]+([^ ]+).*/\1/p' "$DERP_SERVICE" | head -n 1)"
+    [[ -n "$EXISTING_DERP_PORT" ]] || EXISTING_DERP_PORT="$(sed -nE 's/.* -a :([0-9]+).*/\1/p' "$DERP_SERVICE" | head -n 1)"
+  fi
+  if [[ -z "$EXISTING_IP_PREFIX" && -f "$HEADSCALE_CONFIG" ]]; then
+    EXISTING_IP_PREFIX="$(sed -nE 's/^[[:space:]]*v4:[[:space:]]*([0-9.]+)\/[0-9]+.*/\1/p' "$HEADSCALE_CONFIG" | head -n 1)"
+  fi
+  if [[ -z "$EXISTING_PEER_RELAY_PORT" && -f "$PEER_RELAY_STATE_FILE" ]]; then
+    EXISTING_PEER_RELAY_PORT="$(sed -n 's/^PEER_RELAY_PORT=//p' "$PEER_RELAY_STATE_FILE" | head -n 1)"
+  fi
+  [[ "$EXISTING_PANEL_TYPE" == "headache-ui" ]] && EXISTING_PANEL_TYPE="headscale-ui"
+  if [[ -z "$EXISTING_PANEL_TYPE" ]]; then
+    if [[ -f "$HEADPLANE_SERVICE" || -f "$HEADPLANE_CONFIG" ]]; then
+      EXISTING_PANEL_TYPE="headplane"
+      EXISTING_PANEL_PATH="/admin"
+    else
+      EXISTING_PANEL_TYPE="headscale-ui"
+      EXISTING_PANEL_PATH="/web"
+    fi
+  fi
+
+  if [[ "$EXISTING_INSTALL" -eq 1 ]]; then
+    info "检测到已有 Headscale One Click 安装，快速模式将尽量继承现有 IP、端口和面板设置。"
+  fi
+}
+
 prompt_panel_type() {
+  local default_choice="${1:-1}"
   local choice=""
 
   echo
   echo "请选择要安装的面板："
-  echo "1) Headscale-ui（默认，访问路径 /web）"
+  echo "1) Headscale-ui（访问路径 /web）"
   echo "2) Headplane（原生部署，访问路径 /admin）"
-  read -r -p "请输入选项 [默认: 1]: " choice || true
-  choice="${choice:-1}"
+  read -r -p "请输入选项 [默认: ${default_choice}]: " choice || true
+  choice="${choice:-$default_choice}"
 
   case "$choice" in
     1)
@@ -173,6 +270,24 @@ validate_ipv4() {
   local octet
   for octet in "${octets[@]}"; do
     (( 10#$octet >= 0 && 10#$octet <= 255 )) || return 1
+  done
+}
+
+prompt_server_ip() {
+  local default_value="$1"
+  local input_value=""
+  while true; do
+    if validate_ipv4 "$default_value"; then
+      read -r -p "请输入服务器公网 IP [默认: ${default_value}]: " input_value || true
+      input_value="${input_value:-$default_value}"
+    else
+      read -r -p "请输入服务器公网 IPv4: " input_value || true
+    fi
+    if validate_ipv4 "$input_value"; then
+      SERVER_IP="$input_value"
+      return 0
+    fi
+    warn "IPv4 格式无效，请重新输入，例如 1.2.3.4。"
   done
 }
 
@@ -211,7 +326,7 @@ detect_public_ip() {
     fi
   done
 
-  echo "127.0.0.1"
+  echo ""
 }
 
 detect_arch() {
@@ -220,11 +335,9 @@ detect_arch() {
   case "$machine_arch" in
     x86_64|amd64)
       ARCH="amd64"
-      GO_ARCH="amd64"
       ;;
     aarch64|arm64)
       ARCH="arm64"
-      GO_ARCH="arm64"
       ;;
     *)
       die "当前脚本暂不支持该架构：${machine_arch}"
@@ -247,6 +360,110 @@ check_system() {
   esac
 }
 
+tcp_port_in_use() {
+  local port="$1"
+  ss -ltnH 2>/dev/null | awk '{print $4}' | grep -Eq "(^|:)$port$"
+}
+
+udp_port_in_use() {
+  local port="$1"
+  ss -lunH 2>/dev/null | awk '{print $4}' | grep -Eq "(^|:)$port$"
+}
+
+port_in_ephemeral_range() {
+  local port="$1"
+  local range_min=32768
+  local range_max=60999
+  if [[ -r /proc/sys/net/ipv4/ip_local_port_range ]]; then
+    read -r range_min range_max < /proc/sys/net/ipv4/ip_local_port_range || true
+  fi
+  (( port >= range_min && port <= range_max ))
+}
+
+port_is_reserved_for_defaults() {
+  local port="$1"
+  case "$port" in
+    22|53|80|443|3000|3478|8080|18080) return 0 ;;
+  esac
+  return 1
+}
+
+random_free_port() {
+  local proto="$1"
+  shift || true
+  local -a excluded=("$@")
+  local candidate=""
+  local item=""
+  local attempts=0
+  local span=$((RANDOM_PORT_MAX - RANDOM_PORT_MIN + 1))
+
+  while (( attempts < 500 )); do
+    attempts=$((attempts + 1))
+    candidate=$((RANDOM_PORT_MIN + (((RANDOM << 15) | RANDOM) % span)))
+    port_is_reserved_for_defaults "$candidate" && continue
+    port_in_ephemeral_range "$candidate" && continue
+    for item in "${excluded[@]}"; do
+      [[ -n "$item" && "$candidate" == "$item" ]] && candidate="" && break
+    done
+    [[ -n "$candidate" ]] || continue
+    if [[ "$proto" == "tcp" ]]; then
+      tcp_port_in_use "$candidate" && continue
+    else
+      udp_port_in_use "$candidate" && continue
+    fi
+    printf '%s\n' "$candidate"
+    return 0
+  done
+  return 1
+}
+
+project_owns_tcp_port() {
+  local port="$1"
+  [[ -f "$DERP_SERVICE" ]] && grep -qE " -a :${port}([[:space:]]|$)" "$DERP_SERVICE" && return 0
+  [[ -f "$NGINX_AVAILABLE" ]] && grep -qE "^[[:space:]]*listen[[:space:]]+${port};" "$NGINX_AVAILABLE" && return 0
+  [[ -f "$HEADSCALE_CONFIG" ]] && grep -qE "^listen_addr:[[:space:]]+127\.0\.0\.1:${port}([[:space:]]|$)" "$HEADSCALE_CONFIG" && return 0
+  return 1
+}
+
+project_owns_udp_port() {
+  local port="$1"
+  [[ -f "$DERP_SERVICE" ]] && grep -qE -- "-stun-port[ =]+${port}([[:space:]]|$)" "$DERP_SERVICE"
+}
+
+check_selected_ports() {
+  [[ "$HEADSCALE_PORT" != "$HEADSCALE_INTERNAL_PORT" ]] || die "Headscale 外部端口不能使用内部保留端口 ${HEADSCALE_INTERNAL_PORT}。"
+  [[ "$HEADSCALE_PORT" != "$DERP_PORT" ]] || die "Headscale 和 DERP 都使用 TCP，端口不能相同：${HEADSCALE_PORT}"
+  [[ "$PEER_RELAY_DEFAULT_PORT" != "3478" ]] || die "Peer Relay UDP 端口不能与 STUN 3478/udp 相同。"
+  [[ "$PEER_RELAY_DEFAULT_PORT" != "$HEADSCALE_PORT" && "$PEER_RELAY_DEFAULT_PORT" != "$DERP_PORT" ]] || die "为便于维护，Peer Relay 默认端口不能与 Headscale/DERP 使用相同数字。"
+  if tcp_port_in_use "$HEADSCALE_PORT" && ! project_owns_tcp_port "$HEADSCALE_PORT"; then die "Headscale 端口 ${HEADSCALE_PORT}/tcp 已被其它程序占用。"; fi
+  if tcp_port_in_use "$DERP_PORT" && ! project_owns_tcp_port "$DERP_PORT"; then die "DERP 端口 ${DERP_PORT}/tcp 已被其它程序占用。"; fi
+  if tcp_port_in_use "$HEADSCALE_INTERNAL_PORT" && ! project_owns_tcp_port "$HEADSCALE_INTERNAL_PORT"; then die "Headscale 内部端口 ${HEADSCALE_INTERNAL_PORT}/tcp 已被其它程序占用。"; fi
+  if udp_port_in_use 3478 && ! project_owns_udp_port 3478; then die "STUN 端口 3478/udp 已被其它程序占用。"; fi
+  if udp_port_in_use "$PEER_RELAY_DEFAULT_PORT" && [[ "$PEER_RELAY_DEFAULT_PORT" != "${EXISTING_PEER_RELAY_PORT:-}" ]]; then die "Peer Relay 默认端口 ${PEER_RELAY_DEFAULT_PORT}/udp 已被其它程序占用。"; fi
+}
+
+show_preflight_summary() {
+  local disk_mb mem_mb github_status tailscale_status
+  disk_mb="$(df -Pm / | awk 'NR==2 {print $4}')"
+  mem_mb="$(awk '/MemTotal:/ {printf "%d", $2/1024}' /proc/meminfo 2>/dev/null || echo 0)"
+  github_status="⚠ 不可达/较慢"
+  tailscale_status="⚠ 不可达/较慢"
+  curl -fsSI --connect-timeout 5 --max-time 10 https://github.com >/dev/null 2>&1 && github_status="✓ 可达" || true
+  curl -fsSI --connect-timeout 5 --max-time 10 https://pkgs.tailscale.com >/dev/null 2>&1 && tailscale_status="✓ 可达" || true
+  echo
+  echo "========== 安装前环境检查 =========="
+  echo "系统:               ${ID:-unknown} ${VERSION_ID:-unknown}"
+  echo "架构:               ${ARCH}"
+  echo "公网 IPv4:          ${SERVER_IP_DEFAULT:-未检测到}"
+  echo "可用磁盘:           ${disk_mb} MB"
+  echo "内存:               ${mem_mb} MB"
+  echo "GitHub:             ${github_status}"
+  echo "Tailscale Packages: ${tailscale_status}"
+  echo "===================================="
+  (( disk_mb >= 1024 )) || warn "根分区可用空间低于 1GB，安装可能失败。"
+  (( mem_mb >= 512 )) || warn "内存低于 512MB，Headplane 编译可能失败；建议使用 Headscale-ui。"
+}
+
 show_firewall_notice() {
   cat <<EOF
 ${YELLOW}========== 重要提醒 ==========${NC}
@@ -254,9 +471,10 @@ ${YELLOW}========== 重要提醒 ==========${NC}
 为了更适合真实服务器环境，这个整合版不会自动清空防火墙。
 
 请手动确认以下端口已经放行：
-- DERP 端口: ${DERP_PORT}
-- DERP HTTP 端口: ${HTTP_PORT}
+- DERP 端口: ${DERP_PORT}/tcp
 - STUN 端口: 3478/udp
+- Peer Relay 默认端口: ${PEER_RELAY_DEFAULT_PORT}/udp（启用 Peer Relay 时再放行）
+- DERP HTTP 监听: 已关闭
 - Headscale 端口: ${HEADSCALE_PORT}
 - 如果已有反代/HTTPS，还要放行 80 / 443
 ${YELLOW}==============================${NC}
@@ -281,9 +499,9 @@ ask_system_upgrade() {
 
 install_base_packages() {
   info "更新软件源并安装基础依赖..."
-  apt update
+  apt_update_once
   ask_system_upgrade
-  DEBIAN_FRONTEND=noninteractive apt install -y wget git openssl curl unzip nginx ca-certificates tar xz-utils
+  DEBIAN_FRONTEND=noninteractive apt install -y wget git openssl curl unzip nginx ca-certificates tar xz-utils iproute2
 }
 
 prepare_workdir() {
@@ -302,8 +520,9 @@ HEADSCALE_INTERNAL_PORT=${HEADSCALE_INTERNAL_PORT}
 HEADSCALE_URL=http://${SERVER_IP}:${HEADSCALE_PORT}
 DERP_HOST=${DOMAIN}
 DERP_PORT=${DERP_PORT}
-DERP_HTTP_PORT=${HTTP_PORT}
+DERP_HTTP_PORT=-1
 IP_PREFIX=${IP_PREFIX}
+PEER_RELAY_DEFAULT_PORT=${PEER_RELAY_DEFAULT_PORT}
 INSTALL_SCRIPT_VERSION=${SCRIPT_VERSION}
 EOF
 }
@@ -345,7 +564,7 @@ find_or_download_file() {
 ${RED}[ERROR]${NC} 下载失败：${filename}
 可能原因：
 1. 当前服务器无法稳定访问国外源
-2. GitHub / go.dev / tailscale.com 或加速线路在当前网络下超时
+2. GitHub / tailscale.com / Node.js 源或加速线路在当前网络下超时
 3. 目标版本文件名已变化
 
 中国大陆服务器环境建议处理方式：
@@ -374,6 +593,44 @@ github_download_urls() {
     "https://ghfast.top/${source_url}" \
     "https://gh-proxy.com/${source_url}" \
     "$source_url"
+}
+
+derper_release_urls() {
+  local filename="$1"
+  local source_url="https://github.com/${PROJECT_REPO}/releases/download/v${SCRIPT_VERSION}/${filename}"
+  github_download_urls "$source_url"
+}
+
+install_derper_binary() {
+  local asset="derper-linux-${ARCH}"
+  local checksum_asset="${asset}.sha256"
+  local binary_path="${WORKDIR}/${asset}"
+  local checksum_path="${WORKDIR}/${checksum_asset}"
+  local expected=""
+  local actual=""
+  local -a binary_urls=()
+  local -a checksum_urls=()
+
+  if [[ -x "$DERP_DIR/derper" ]] && "$DERP_DIR/derper" -version 2>&1 | grep -q "$DERPER_TAILSCALE_VERSION"; then
+    info "检测到兼容的 DERP 预编译二进制，跳过重复下载。"
+    return 0
+  fi
+
+  mapfile -t binary_urls < <(derper_release_urls "$asset")
+  mapfile -t checksum_urls < <(derper_release_urls "$checksum_asset")
+
+  find_or_download_file "$asset" "$binary_path" "${binary_urls[@]}" || die "DERP 预编译二进制下载失败。可把 ${asset} 和 ${checksum_asset} 上传到 /root/ 后重试。"
+  find_or_download_file "$checksum_asset" "$checksum_path" "${checksum_urls[@]}" || die "DERP SHA256 文件下载失败。"
+
+  expected="$(grep -oE '[0-9a-fA-F]{64}' "$checksum_path" | head -n 1 | tr 'A-F' 'a-f')"
+  actual="$(sha256sum "$binary_path" | awk '{print $1}')"
+  [[ "$expected" =~ ^[0-9a-f]{64}$ ]] || die "DERP SHA256 文件格式无效：${checksum_asset}"
+  [[ "$actual" == "$expected" ]] || die "DERP 预编译二进制 SHA256 校验失败：${asset}"
+
+  mkdir -p "$DERP_DIR"
+  install -m 0755 "$binary_path" "$DERP_DIR/derper"
+  "$DERP_DIR/derper" -version >/dev/null 2>&1 || die "DERP 二进制无法正常执行。"
+  success "DERP 预编译二进制安装完成（Tailscale ${DERPER_TAILSCALE_VERSION}，无需 Go）。"
 }
 
 tailscale_download_urls() {
@@ -522,58 +779,26 @@ node_expected_sha256() {
   return 1
 }
 
-install_go() {
-  local go_version="$1"
-  local go_file="go${go_version}.linux-${GO_ARCH}.tar.gz"
-  local go_tar="${WORKDIR}/${go_file}"
-
-  info "安装 Go ${go_version}..."
-  find_or_download_file "$go_file" "$go_tar" \
-    "https://golang.google.cn/dl/${go_file}" \
-    "https://go.dev/dl/${go_file}" \
-    "https://dl.google.com/go/${go_file}"
-  rm -rf /usr/local/go
-  tar -C /usr/local -xzf "$go_tar"
-
-  export PATH="$PATH:/usr/local/go/bin"
-  if ! grep -q '/usr/local/go/bin' /etc/profile; then
-    echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile
-  fi
-
-  go version >/dev/null 2>&1 || die "Go 安装失败。"
-  go env -w GO111MODULE=on
-  go env -w GOPROXY=https://goproxy.cn,direct
-  success "Go 安装完成。"
-}
-
 install_derp() {
-  local tailscale_version="$1"
-  local gopath=""
-  local derper_bin=""
   local san_type="DNS"
 
-  info "开始安装 DERP 服务（Tailscale ${tailscale_version}）..."
-  export PATH="$PATH:/usr/local/go/bin"
-
-  go install "tailscale.com/cmd/derper@v${tailscale_version}"
-
-  gopath="$(go env GOPATH)"
-  mkdir -p "$DERP_DIR"
-  derper_bin="${gopath}/bin/derper"
-  [[ -x "$derper_bin" ]] || die "derper 编译完成后未找到可执行文件：${derper_bin}"
-  install -m 0755 "$derper_bin" "$DERP_DIR/derper"
-  [[ -x "$DERP_DIR/derper" ]] || die "derper 编译失败，未生成可执行文件。"
+  info "开始安装 DERP 服务（预编译 derper，无需 Go）..."
+  install_derper_binary
 
   if validate_ipv4 "$DOMAIN"; then
     san_type="IP"
   fi
 
-  info "生成 DERP 自签名证书（使用客户端证书指纹固定，不再修改 Tailscale 源码）..."
-  openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes \
-    -keyout "$DERP_DIR/${DOMAIN}.key" \
-    -out "$DERP_DIR/${DOMAIN}.crt" \
-    -subj "/CN=${DOMAIN}" \
-    -addext "subjectAltName=${san_type}:${DOMAIN}"
+  if [[ -s "$DERP_DIR/${DOMAIN}.key" && -s "$DERP_DIR/${DOMAIN}.crt" ]] && openssl x509 -checkend 2592000 -noout -in "$DERP_DIR/${DOMAIN}.crt" >/dev/null 2>&1; then
+    info "检测到现有 DERP 证书仍有效，继续复用，避免无必要变更证书指纹。"
+  else
+    info "生成 DERP 自签名证书（使用客户端证书指纹固定）..."
+    openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes \
+      -keyout "$DERP_DIR/${DOMAIN}.key" \
+      -out "$DERP_DIR/${DOMAIN}.crt" \
+      -subj "/CN=${DOMAIN}" \
+      -addext "subjectAltName=${san_type}:${DOMAIN}"
+  fi
 
   DERP_CERT_HASH="$(openssl x509 -in "$DERP_DIR/${DOMAIN}.crt" -outform DER | sha256sum | awk '{print $1}')"
   [[ "$DERP_CERT_HASH" =~ ^[0-9a-f]{64}$ ]] || die "DERP 证书 SHA256 指纹计算失败。"
@@ -587,7 +812,7 @@ Wants=network.target
 [Service]
 User=root
 Restart=always
-ExecStart=${DERP_DIR}/derper -hostname ${DOMAIN} -a :${DERP_PORT} -http-port ${HTTP_PORT} -stun=true -stun-port 3478 -certmode manual -certdir ${DERP_DIR}
+ExecStart=${DERP_DIR}/derper -hostname ${DOMAIN} -a :${DERP_PORT} -http-port -1 -stun=true -stun-port 3478 -certmode manual -certdir ${DERP_DIR}
 RestartPreventExitStatus=1
 
 [Install]
@@ -769,6 +994,11 @@ install_headscale() {
   target_minor="$(cut -d. -f2 <<< "$headscale_version")"
   if command_exists headscale; then
     current_version="$(headscale version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1 || true)"
+  fi
+
+  if [[ -n "$current_version" && "$current_version" == "$headscale_version" ]]; then
+    info "检测到 Headscale ${current_version} 已是目标版本，跳过 DEB 重装。"
+    return 0
   fi
 
   if [[ -n "$current_version" ]]; then
@@ -1083,7 +1313,6 @@ EOF
  proxy_set_header X-Real-IP \$remote_addr;
  proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
  proxy_set_header X-Forwarded-Proto \$scheme;
- add_header Strict-Transport-Security "max-age=15552000; includeSubDomains" always;
  }
 }
 EOF
@@ -1099,7 +1328,6 @@ EOF
  proxy_set_header X-Real-IP \$remote_addr;
  proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
  proxy_set_header X-Forwarded-Proto \$scheme;
- add_header Strict-Transport-Security "max-age=15552000; includeSubDomains" always;
  }
  location /web {
  index index.html;
@@ -1235,6 +1463,36 @@ enable_verify_clients_if_needed() {
   fi
 }
 
+post_install_health_check() {
+  local failures=0
+  local panel_url="http://127.0.0.1:${HEADSCALE_PORT}${PANEL_PATH%/}/"
+
+  echo
+  echo "========== 安装验收 =========="
+  if headscale -c "$HEADSCALE_CONFIG" configtest >/dev/null 2>&1; then echo "Headscale configtest   ✓"; else echo "Headscale configtest   ✗"; failures=$((failures + 1)); fi
+  if systemctl is-active --quiet headscale; then echo "Headscale service      ✓"; else echo "Headscale service      ✗"; failures=$((failures + 1)); fi
+  if curl -fsS --connect-timeout 3 --max-time 5 "http://127.0.0.1:${HEADSCALE_INTERNAL_PORT}/health" >/dev/null 2>&1; then echo "Headscale /health      ✓"; else echo "Headscale /health      ✗"; failures=$((failures + 1)); fi
+  if nginx -t >/dev/null 2>&1; then echo "Nginx config           ✓"; else echo "Nginx config           ✗"; failures=$((failures + 1)); fi
+  if systemctl is-active --quiet nginx; then echo "Nginx service          ✓"; else echo "Nginx service          ✗"; failures=$((failures + 1)); fi
+  if curl -fsS --connect-timeout 3 --max-time 5 -H "Host: ${SERVER_IP}" "$panel_url" >/dev/null 2>&1; then echo "管理面板               ✓"; else echo "管理面板               ✗"; failures=$((failures + 1)); fi
+  if systemctl is-active --quiet derp; then echo "DERP service           ✓"; else echo "DERP service           ✗"; failures=$((failures + 1)); fi
+  if tcp_port_in_use "$DERP_PORT"; then echo "DERP TCP ${DERP_PORT}        ✓"; else echo "DERP TCP ${DERP_PORT}        ✗"; failures=$((failures + 1)); fi
+  if udp_port_in_use 3478; then echo "STUN UDP 3478         ✓"; else echo "STUN UDP 3478         ✗"; failures=$((failures + 1)); fi
+  if command_exists tailscale && systemctl is-active --quiet tailscaled; then echo "Tailscale client       ✓"; else echo "Tailscale client       ✗"; failures=$((failures + 1)); fi
+  if [[ "$PANEL_TYPE" == "headplane" ]]; then
+    if systemctl is-active --quiet headplane; then echo "Headplane service      ✓"; else echo "Headplane service      ✗"; failures=$((failures + 1)); fi
+  fi
+  echo "Peer Relay             ○ 尚未配置/按需启用"
+  echo "=============================="
+
+  if [[ "$failures" -eq 0 ]]; then
+    success "安装验收全部通过。"
+    return 0
+  fi
+  warn "安装主体已完成，但有 ${failures} 项验收未通过。请先查看上方项目，再使用 hs 菜单排查。"
+  return 1
+}
+
 show_summary() {
   local panel_url="http://${SERVER_IP}:${HEADSCALE_PORT}${PANEL_PATH}"
 
@@ -1254,66 +1512,158 @@ ${GREEN}安装完成。${NC}
 
 DERP：
 - 自建 DERP Map: ${DERP_MAP}
-- 证书使用 SHA256 指纹固定，不再修改 Tailscale derper 源码
+- 证书使用 SHA256 指纹固定
+- 使用项目 Release 预编译 derper，目标服务器无需 Go
+- DERP HTTP listener 已关闭
 - 请确认 UDP 3478（STUN）和 TCP ${DERP_PORT} 已放行
 
 Peer Relay：
+- 默认 UDP 端口: ${PEER_RELAY_DEFAULT_PORT}（首次安装随机生成并保存）
 - 安装完成后输入 hs，选择“Peer Relay 管理”
 - 连接优先级：DIRECT -> Peer Relay -> DERP
 EOF
 }
 
 main() {
+  local confirm=""
+  local reinstall_panel=1
+  local current_headscale=""
+  local current_tailscale=""
+  local default_headscale_port=""
+  local default_derp_port=""
+  local default_peer_relay_port=""
+
   require_root
   check_system
+  install_preflight_tools
   detect_arch
   prepare_workdir
-
-  prompt_value DOMAIN "请输入域名" "derp.example.com"
   SERVER_IP_DEFAULT="$(detect_public_ip)"
-  prompt_value SERVER_IP "请输入服务器IP" "$SERVER_IP_DEFAULT"
-  prompt_value HEADSCALE_PORT "请输入Headscale端口" "8080"
-  prompt_value IP_PREFIX "请输入IP前缀（例如：100.64.0.0）" "100.64.0.0"
-  prompt_value DERP_PORT "请输入Derp服务端口" "12345"
-  prompt_value HTTP_PORT "请输入HTTP端口" "3340"
-  detect_latest_versions
-  prompt_version_value GO_VERSION "Go（不要带 go 前缀）" "$GO_LATEST_VERSION" "$GO_FALLBACK_VERSION"
-  prompt_version_value TAILSCALE_VERSION "Tailscale DERP" "$TAILSCALE_LATEST_VERSION" "$TAILSCALE_FALLBACK_VERSION"
-  prompt_version_value HEADSCALE_VERSION "Headscale" "$HEADSCALE_LATEST_VERSION" "$HEADSCALE_FALLBACK_VERSION"
-  prompt_panel_type
-  if [[ "$PANEL_TYPE" == "headplane" ]]; then
-    prompt_version_value HEADPLANE_VERSION "Headplane" "$HEADPLANE_LATEST_VERSION" "$HEADPLANE_FALLBACK_VERSION"
+  load_existing_install_defaults
+  show_preflight_summary
+  prompt_install_mode
+
+  if [[ "$INSTALL_MODE" == "quick" ]]; then
+    if [[ "$EXISTING_INSTALL" -eq 1 ]]; then
+      SERVER_IP="${EXISTING_SERVER_IP:-$SERVER_IP_DEFAULT}"
+      if ! validate_ipv4 "$SERVER_IP"; then
+        prompt_server_ip "$SERVER_IP_DEFAULT"
+      fi
+      DOMAIN="${EXISTING_DERP_HOST:-$SERVER_IP}"
+      [[ -n "$EXISTING_HEADSCALE_PORT" ]] || die "检测到已有安装，但无法识别原 Headscale 端口。请改用高级模式确认配置，脚本不会擅自更换端口。"
+      [[ -n "$EXISTING_DERP_PORT" ]] || die "检测到已有安装，但无法识别原 DERP 端口。请改用高级模式确认配置，脚本不会擅自更换端口。"
+      HEADSCALE_PORT="$EXISTING_HEADSCALE_PORT"
+      DERP_PORT="$EXISTING_DERP_PORT"
+      PEER_RELAY_DEFAULT_PORT="${EXISTING_PEER_RELAY_PORT:-40000}"
+      PANEL_TYPE="${EXISTING_PANEL_TYPE:-headscale-ui}"
+      PANEL_PATH="${EXISTING_PANEL_PATH:-/web}"
+      reinstall_panel=0
+    else
+      if validate_ipv4 "$SERVER_IP_DEFAULT"; then
+        SERVER_IP="$SERVER_IP_DEFAULT"
+      else
+        prompt_server_ip ""
+      fi
+      DOMAIN="$SERVER_IP"
+      HEADSCALE_PORT="$(random_free_port tcp)" || die "无法为 Headscale 生成可用随机端口。"
+      DERP_PORT="$(random_free_port tcp "$HEADSCALE_PORT")" || die "无法为 DERP 生成可用随机端口。"
+      PEER_RELAY_DEFAULT_PORT="$(random_free_port udp "$HEADSCALE_PORT" "$DERP_PORT")" || die "无法为 Peer Relay 生成可用随机端口。"
+      PANEL_TYPE="headscale-ui"
+      PANEL_PATH="/web"
+    fi
+    IP_PREFIX="${EXISTING_IP_PREFIX:-100.64.0.0}"
+    current_tailscale="$(tailscale version 2>/dev/null | head -n 1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1 || true)"
+    current_headscale="$(headscale version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1 || true)"
+    TAILSCALE_VERSION="${current_tailscale:-$TAILSCALE_FALLBACK_VERSION}"
+    HEADSCALE_VERSION="${current_headscale:-$HEADSCALE_FALLBACK_VERSION}"
+    if [[ "$PANEL_TYPE" == "headplane" ]]; then
+      HEADPLANE_VERSION="$HEADPLANE_FALLBACK_VERSION"
+    else
+      HEADSCALE_UI_VERSION="$HEADSCALE_UI_FALLBACK_VERSION"
+    fi
+    info "快速模式：新安装默认使用公网 IP 作为 DERP 主机名，并为公网服务随机生成一次端口；已有安装会继承原配置。"
   else
-    prompt_version_value HEADSCALE_UI_VERSION "Headscale-ui" "$HEADSCALE_UI_LATEST_VERSION" "$HEADSCALE_UI_FALLBACK_VERSION"
+    prompt_server_ip "${EXISTING_SERVER_IP:-${SERVER_IP_DEFAULT:-}}"
+    prompt_value DOMAIN "请输入 DERP 主机名（无域名可直接使用公网 IP）" "${EXISTING_DERP_HOST:-$SERVER_IP}"
+    default_headscale_port="${EXISTING_HEADSCALE_PORT:-}"
+    [[ -n "$default_headscale_port" ]] || default_headscale_port="$(random_free_port tcp)" || die "无法生成 Headscale 默认随机端口。"
+    default_derp_port="${EXISTING_DERP_PORT:-}"
+    [[ -n "$default_derp_port" ]] || default_derp_port="$(random_free_port tcp "$default_headscale_port")" || die "无法生成 DERP 默认随机端口。"
+    default_peer_relay_port="${EXISTING_PEER_RELAY_PORT:-}"
+    if [[ -z "$default_peer_relay_port" ]]; then
+      if [[ "$EXISTING_INSTALL" -eq 1 ]]; then
+        default_peer_relay_port="40000"
+      else
+        default_peer_relay_port="$(random_free_port udp "$default_headscale_port" "$default_derp_port")" || die "无法生成 Peer Relay 默认随机端口。"
+      fi
+    fi
+    prompt_value HEADSCALE_PORT "请输入 Headscale 端口" "$default_headscale_port"
+    prompt_value IP_PREFIX "请输入 IP 前缀（例如：100.64.0.0）" "${EXISTING_IP_PREFIX:-100.64.0.0}"
+    prompt_value DERP_PORT "请输入 DERP 服务端口" "$default_derp_port"
+    prompt_value PEER_RELAY_DEFAULT_PORT "请输入 Peer Relay 默认 UDP 端口（启用时使用）" "$default_peer_relay_port"
+    detect_latest_versions
+    prompt_version_value TAILSCALE_VERSION "Tailscale 客户端" "$TAILSCALE_LATEST_VERSION" "$TAILSCALE_FALLBACK_VERSION"
+    prompt_version_value HEADSCALE_VERSION "Headscale" "$HEADSCALE_LATEST_VERSION" "$HEADSCALE_FALLBACK_VERSION"
+    if [[ "${EXISTING_PANEL_TYPE:-}" == "headplane" ]]; then
+      prompt_panel_type 2
+    else
+      prompt_panel_type 1
+    fi
+    if [[ "$PANEL_TYPE" == "headplane" ]]; then
+      prompt_version_value HEADPLANE_VERSION "Headplane" "$HEADPLANE_LATEST_VERSION" "$HEADPLANE_FALLBACK_VERSION"
+    else
+      prompt_version_value HEADSCALE_UI_VERSION "Headscale-ui" "$HEADSCALE_UI_LATEST_VERSION" "$HEADSCALE_UI_FALLBACK_VERSION"
+    fi
   fi
 
-  validate_ipv4 "$SERVER_IP" || die "服务器IP格式不正确。"
-  validate_hostname_or_ipv4 "$DOMAIN" || die "DERP 域名/主机名格式不正确；只允许标准 DNS 主机名或 IPv4 地址。"
-  validate_ipv4 "$IP_PREFIX" || die "IP前缀格式不正确，应类似 100.64.0.0"
-  validate_port "$HEADSCALE_PORT" || die "Headscale端口无效。"
-  [[ "$HEADSCALE_PORT" != "$HEADSCALE_INTERNAL_PORT" ]] || die "Headscale 外部访问端口不能使用内部保留端口 ${HEADSCALE_INTERNAL_PORT}。"
-  validate_port "$DERP_PORT" || die "Derp端口无效。"
-  validate_port "$HTTP_PORT" || die "HTTP端口无效。"
+  validate_ipv4 "$SERVER_IP" || die "服务器 IP 格式不正确。"
+  validate_hostname_or_ipv4 "$DOMAIN" || die "DERP 主机名格式不正确；只允许标准 DNS 主机名或 IPv4 地址。"
+  validate_ipv4 "$IP_PREFIX" || die "IP 前缀格式不正确，应类似 100.64.0.0"
+  validate_port "$HEADSCALE_PORT" || die "Headscale 端口无效。"
+  validate_port "$DERP_PORT" || die "DERP 端口无效。"
+  validate_port "$PEER_RELAY_DEFAULT_PORT" || die "Peer Relay 默认端口无效。"
+  check_selected_ports
+
+  echo
+  echo "========== 安装计划 =========="
+  echo "模式:          ${INSTALL_MODE}"
+  echo "服务器 IP:     ${SERVER_IP}"
+  echo "DERP 主机名:   ${DOMAIN}"
+  echo "Headscale:     ${HEADSCALE_VERSION} / TCP ${HEADSCALE_PORT}"
+  echo "Tailscale:     ${TAILSCALE_VERSION}"
+  echo "DERP:          Tailscale ${DERPER_TAILSCALE_VERSION} 预编译版 / TCP ${DERP_PORT} / UDP 3478"
+  echo "Peer Relay:    UDP ${PEER_RELAY_DEFAULT_PORT}（按需启用）"
+  echo "管理面板:      ${PANEL_TYPE}"
+  echo "DERP HTTP:     已关闭"
+  echo "=============================="
+  read -r -p "确认开始安装？[Y/n]: " confirm || true
+  confirm="${confirm:-Y}"
+  [[ "$confirm" =~ ^[Yy]$ ]] || { warn "已取消安装。"; exit 0; }
 
   show_firewall_notice
   install_base_packages
-  install_go "$GO_VERSION"
-  install_derp "$TAILSCALE_VERSION"
+  install_derp
   install_tailscale "$TAILSCALE_VERSION"
   install_headscale "$HEADSCALE_VERSION"
   configure_headscale
-  if [[ "$PANEL_TYPE" == "headplane" ]]; then
-    install_headplane "$HEADPLANE_VERSION"
+  if [[ "$reinstall_panel" -eq 1 ]]; then
+    if [[ "$PANEL_TYPE" == "headplane" ]]; then
+      install_headplane "$HEADPLANE_VERSION"
+    else
+      install_headscale_ui "$HEADSCALE_UI_VERSION"
+    fi
   else
-    install_headscale_ui "$HEADSCALE_UI_VERSION"
+    info "快速升级检测到已有面板，跳过重复安装面板文件。"
   fi
   configure_nginx
-  if [[ "$PANEL_TYPE" == "headplane" ]]; then
-    systemctl restart headplane
-  fi
   save_panel_state
-  create_apikey
+  if [[ "$EXISTING_INSTALL" -eq 0 ]]; then
+    create_apikey
+  else
+    info "已有安装：跳过自动生成新的 API Key；需要时可手动执行 headscale apikeys create。"
+  fi
   enable_verify_clients_if_needed
+  post_install_health_check || true
   show_summary
 }
 

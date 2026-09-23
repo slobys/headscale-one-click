@@ -42,6 +42,7 @@ load_panel_state() {
   DERP_HTTP_PORT=""
   IP_PREFIX=""
   INSTALL_SCRIPT_VERSION=""
+  PEER_RELAY_DEFAULT_PORT=""
 
   if [[ -f "$PANEL_STATE_FILE" ]]; then
     # shellcheck disable=SC1090
@@ -79,10 +80,11 @@ show_install_info() {
   local server_url=""
   local panel_url=""
   local peer_relay_status="未启用"
-  local peer_relay_port="40000"
+  local peer_relay_port=""
   local verify_status="未启用"
 
   load_panel_state
+  peer_relay_port="${PEER_RELAY_DEFAULT_PORT:-40000}"
   infer_derp_state
   server_url="$(read_headscale_server_url)"
 
@@ -96,7 +98,7 @@ show_install_info() {
     # shellcheck disable=SC1090
     source "$PEER_RELAY_STATE_FILE"
     peer_relay_status="已启用"
-    peer_relay_port="${PEER_RELAY_PORT:-40000}"
+    peer_relay_port="${PEER_RELAY_PORT:-${PEER_RELAY_DEFAULT_PORT:-40000}}"
   fi
 
   if [[ -f "$DERP_SERVICE" ]] && grep -q -- '-verify-client-url ' "$DERP_SERVICE"; then
@@ -130,7 +132,11 @@ show_install_info() {
   echo "- DERP 主机名: ${DERP_HOST:-未知}"
   echo "- DERP Map: ${DERP_MAP}"
   echo "- DERP TCP 端口: ${DERP_PORT:-未知}"
-  echo "- DERP HTTP 端口: ${DERP_HTTP_PORT:-未知}"
+  if [[ "${DERP_HTTP_PORT:-}" == "-1" ]]; then
+    echo "- DERP HTTP listener: 已关闭"
+  else
+    echo "- DERP HTTP 端口: ${DERP_HTTP_PORT:-未知}"
+  fi
   echo "- STUN UDP 端口: 3478"
   echo "- 客户端校验: ${verify_status}"
   [[ -n "${IP_PREFIX:-}" ]] && echo "- Tailscale IPv4 网段: ${IP_PREFIX}"

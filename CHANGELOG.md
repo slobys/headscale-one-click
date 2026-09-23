@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## v2.3.0 - 2026-09-23
+
+### Added
+- 新增安装前 Preflight：最小依赖、系统/架构、公网 IPv4、磁盘、内存、GitHub/Tailscale 连通性和端口冲突检查
+- 新增“快速安装 / 高级安装”双模式；快速模式对新服务器使用推荐默认值，对已有安装尽量继承原有 IP、端口和面板
+- 新增 GitHub Actions DERP 构建流程，为 Release 生成 amd64/arm64 预编译 derper 及 SHA256 文件
+- 新增安装完成健康检查，验证 Headscale configtest、/health、Nginx、管理面板、DERP、STUN 和 Tailscale
+- 新安装为 Headscale TCP、DERP TCP、Peer Relay UDP 随机生成一次未占用端口并持久化；STUN 继续固定 3478/udp
+
+### Changed
+- 目标 VPS 不再安装 Go、不再现场编译 derper，改为本地文件优先 + Release 预编译二进制 + SHA256 校验
+- DERP 主机名默认使用自动检测到的公网 IPv4，域名改为可选
+- 高级模式的公网服务端口默认值也改为随机未占用端口，同时允许手动覆盖；已有安装继续沿用原端口
+- DERP HTTP listener 默认关闭（`-http-port -1`），不再输入或开放 3340/tcp
+- HTTP Nginx 配置移除 HSTS 响应头；HSTS 留待后续 HTTPS 模式使用
+- 重复安装时复用仍有效的 DERP 证书；Headscale 已是目标版本时跳过 DEB 重装；已有安装不再反复生成 API Key
+- bootstrap 源码目录替换增加失败回滚
+- Headplane 更新保留备份直到新服务启动成功，失败时自动回滚；面板更新不再无必要重启 Headscale / DERP
+
 ## v2.2.0 - 2026-09-23
 
 ### Added
