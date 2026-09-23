@@ -139,7 +139,7 @@ show_install_info() {
   fi
   echo "- STUN UDP 端口: 3478"
   echo "- 客户端校验: ${verify_status}"
-  [[ -n "${IP_PREFIX:-}" ]] && echo "- Tailscale IPv4 网段: ${IP_PREFIX}"
+  [[ -n "${IP_PREFIX:-}" ]] && echo "- Tailscale 虚拟内网网段: ${IP_PREFIX%/24}/24"
   echo
   echo "Peer Relay："
   echo "- 状态: ${peer_relay_status}"

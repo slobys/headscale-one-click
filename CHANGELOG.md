@@ -10,6 +10,7 @@
 - 新增 GitHub Actions DERP 构建流程，为 Release 生成 amd64/arm64 预编译 derper 及 SHA256 文件
 - 新增安装完成健康检查，验证 Headscale configtest、/health、Nginx、管理面板、DERP、STUN 和 Tailscale
 - 新安装为 Headscale TCP、DERP TCP、Peer Relay UDP 随机生成一次未占用端口并持久化；STUN 继续固定 3478/udp
+- 快速安装新增 Tailscale 虚拟内网网段输入，默认 `100.64.0.0/24`；全新安装可自定义，已有安装继续沿用原网段
 
 ### Changed
 - 目标 VPS 不再安装 Go、不再现场编译 derper，改为本地文件优先 + Release 预编译二进制 + SHA256 校验

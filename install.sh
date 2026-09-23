@@ -273,6 +273,27 @@ validate_ipv4() {
   done
 }
 
+validate_ip_prefix24() {
+  local prefix="$1"
+  validate_ipv4 "$prefix" || return 1
+  [[ "${prefix##*.}" == "0" ]]
+}
+
+prompt_ip_prefix() {
+  local default_value="$1"
+  local input_value=""
+  while true; do
+    read -r -p "请输入 Tailscale 虚拟内网网段（/24，例如 100.64.10.0） [默认: ${default_value}]: " input_value || true
+    input_value="${input_value:-$default_value}"
+    input_value="${input_value%/24}"
+    if validate_ip_prefix24 "$input_value"; then
+      IP_PREFIX="$input_value"
+      return 0
+    fi
+    warn "网段格式无效。当前脚本使用 /24，请填写类似 100.64.10.0 或 100.64.10.0/24 的网络地址。"
+  done
+}
+
 prompt_server_ip() {
   local default_value="$1"
   local input_value=""
@@ -1506,6 +1527,9 @@ ${GREEN}安装完成。${NC}
 客户端首次接入命令：
   tailscale login --login-server=http://${SERVER_IP}:${HEADSCALE_PORT}
 
+Tailscale 虚拟内网网段：
+  ${IP_PREFIX}/24
+
 子网路由示例：
   tailscale up --login-server=http://${SERVER_IP}:${HEADSCALE_PORT} --accept-routes=true
   tailscale up --login-server=http://${SERVER_IP}:${HEADSCALE_PORT} --accept-routes=true --accept-dns=false --advertise-routes=192.168.2.0/24 --reset
@@ -1571,7 +1595,12 @@ main() {
       PANEL_TYPE="headscale-ui"
       PANEL_PATH="/web"
     fi
-    IP_PREFIX="${EXISTING_IP_PREFIX:-100.64.0.0}"
+    if [[ "$EXISTING_INSTALL" -eq 1 ]]; then
+      IP_PREFIX="${EXISTING_IP_PREFIX:-100.64.0.0}"
+      info "已有安装：继续使用 Tailscale 虚拟内网网段 ${IP_PREFIX}/24，快速模式不会自动修改。"
+    else
+      prompt_ip_prefix "100.64.0.0"
+    fi
     current_tailscale="$(tailscale version 2>/dev/null | head -n 1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1 || true)"
     current_headscale="$(headscale version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1 || true)"
     TAILSCALE_VERSION="${current_tailscale:-$TAILSCALE_FALLBACK_VERSION}"
@@ -1598,7 +1627,7 @@ main() {
       fi
     fi
     prompt_value HEADSCALE_PORT "请输入 Headscale 端口" "$default_headscale_port"
-    prompt_value IP_PREFIX "请输入 IP 前缀（例如：100.64.0.0）" "${EXISTING_IP_PREFIX:-100.64.0.0}"
+    prompt_ip_prefix "${EXISTING_IP_PREFIX:-100.64.0.0}"
     prompt_value DERP_PORT "请输入 DERP 服务端口" "$default_derp_port"
     prompt_value PEER_RELAY_DEFAULT_PORT "请输入 Peer Relay 默认 UDP 端口（启用时使用）" "$default_peer_relay_port"
     detect_latest_versions
@@ -1618,7 +1647,7 @@ main() {
 
   validate_ipv4 "$SERVER_IP" || die "服务器 IP 格式不正确。"
   validate_hostname_or_ipv4 "$DOMAIN" || die "DERP 主机名格式不正确；只允许标准 DNS 主机名或 IPv4 地址。"
-  validate_ipv4 "$IP_PREFIX" || die "IP 前缀格式不正确，应类似 100.64.0.0"
+  validate_ip_prefix24 "$IP_PREFIX" || die "Tailscale 虚拟内网网段格式不正确；当前脚本使用 /24，应类似 100.64.10.0。"
   validate_port "$HEADSCALE_PORT" || die "Headscale 端口无效。"
   validate_port "$DERP_PORT" || die "DERP 端口无效。"
   validate_port "$PEER_RELAY_DEFAULT_PORT" || die "Peer Relay 默认端口无效。"
@@ -1631,6 +1660,7 @@ main() {
   echo "DERP 主机名:   ${DOMAIN}"
   echo "Headscale:     ${HEADSCALE_VERSION} / TCP ${HEADSCALE_PORT}"
   echo "Tailscale:     ${TAILSCALE_VERSION}"
+  echo "虚拟内网网段: ${IP_PREFIX}/24"
   echo "DERP:          Tailscale ${DERPER_TAILSCALE_VERSION} 预编译版 / TCP ${DERP_PORT} / UDP 3478"
   echo "Peer Relay:    UDP ${PEER_RELAY_DEFAULT_PORT}（按需启用）"
   echo "管理面板:      ${PANEL_TYPE}"
