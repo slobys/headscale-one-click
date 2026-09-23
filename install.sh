@@ -1682,6 +1682,42 @@ EOF
   fi
 }
 
+wait_for_nginx_listener() {
+  local port="$1"
+  local attempts="${2:-10}"
+  local i=0
+
+  for ((i=1; i<=attempts; i++)); do
+    if tcp_port_used_by_nginx "$port"; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+wait_for_https_health() {
+  local attempts="${1:-10}"
+  local i=0
+
+  for ((i=1; i<=attempts; i++)); do
+    if curl -fsS --connect-timeout 2 --max-time 5 \
+      --connect-to "${CONTROL_HOST}:${HEADSCALE_HTTPS_PORT}:127.0.0.1:${HEADSCALE_HTTPS_PORT}" \
+      "${CONTROL_URL}/health" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+show_nginx_failure_context() {
+  warn "Nginx 当前监听："
+  ss -lntp 2>/dev/null | grep -E ':(80|443|[0-9]{4,5})\b' | grep -E 'nginx|State|LISTEN' | tail -n 20 || true
+  warn "Nginx 最近日志："
+  journalctl -u nginx -n 30 --no-pager 2>/dev/null || true
+}
+
 configure_nginx() {
   local staged=""
   local backup=""
@@ -1716,7 +1752,10 @@ configure_nginx() {
   fi
 
   systemctl enable nginx >/dev/null 2>&1 || true
-  if ! systemctl reload nginx 2>/dev/null; then
+  if systemctl reload nginx 2>/dev/null; then
+    info "Nginx reload 已发送，等待 HTTPS 443 实际监听..."
+  else
+    warn "Nginx reload 失败，改用 restart 应用 HTTPS 配置..."
     if ! systemctl restart nginx; then
       error "Nginx HTTPS 启动失败，正在恢复旧配置..."
       if [[ "$had_old" -eq 1 ]]; then
@@ -1729,8 +1768,26 @@ configure_nginx() {
     fi
   fi
 
-  if ! curl -fsS --max-time 8 --connect-to "${CONTROL_HOST}:443:127.0.0.1:443" "${CONTROL_URL}/health" >/dev/null; then
+  if ! wait_for_nginx_listener "$HEADSCALE_HTTPS_PORT" 10; then
+    warn "reload 后 443 尚未监听，尝试完整 restart Nginx..."
+    if ! systemctl restart nginx || ! wait_for_nginx_listener "$HEADSCALE_HTTPS_PORT" 10; then
+      error "Nginx 重启后仍未监听 HTTPS 443，正在恢复旧配置..."
+      show_nginx_failure_context
+      if [[ "$had_old" -eq 1 ]]; then
+        cp -f "$backup" "$NGINX_AVAILABLE"
+      else
+        rm -f "$NGINX_AVAILABLE" "$NGINX_ENABLED"
+      fi
+      nginx -t >/dev/null 2>&1 && systemctl restart nginx >/dev/null 2>&1 || true
+      die "Nginx 未能建立 443 监听，Headscale server_url 尚未切换。"
+    fi
+  fi
+  success "Nginx 已实际监听 HTTPS 443。"
+
+  info "验证 HTTPS 443 -> Headscale /health..."
+  if ! wait_for_https_health 10; then
     error "HTTPS 443 本机验证失败，正在恢复旧 Nginx 配置..."
+    show_nginx_failure_context
     if [[ "$had_old" -eq 1 ]]; then
       cp -f "$backup" "$NGINX_AVAILABLE"
     else
