@@ -132,6 +132,24 @@ tailscale up --login-server=https://39.106.53.251 --accept-routes=true
 tailscale up --login-server=https://39.106.53.251 --accept-routes=true --accept-dns=false --advertise-routes=192.168.2.0/24 --reset
 ```
 
+## Headscale API Key
+
+全新安装会自动创建并显示一个 API Key；已有安装会询问是否创建新的 Key。
+
+以后也可以直接进入：
+
+```text
+hs -> 12. 创建 Headscale API Key
+```
+
+完整 API Key 只会在创建时显示一次，请立即保存；如果丢失，需要重新创建新的 Key。
+
+## HTTPS 证书续期
+
+脚本会安装 `headscale-one-click-certbot-renew.timer`，每天自动检查两次证书是否需要续期，续期成功后自动 reload Nginx。
+
+不需要每隔几天手动重新申请证书，但公网 `80/tcp` 必须保持可访问，以便 Let's Encrypt 完成 HTTP-01 续期验证。
+
 ## 从 v2.3.0 升级
 
 旧版使用类似：

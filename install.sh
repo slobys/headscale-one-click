@@ -1979,16 +1979,49 @@ EOF
 create_apikey() {
   info "生成 Headscale API Key..."
   local attempt
+  local api_key=""
   for attempt in 1 2 3 4 5; do
-    if headscale apikeys create; then
+    if api_key="$(headscale apikeys create)"; then
+      echo
+      echo "=========================================="
+      success "Headscale API Key 已创建"
+      echo "=========================================="
+      echo "$api_key"
+      echo "=========================================="
+      warn "请立即保存这个 API Key：Headscale 不支持之后再次取回完整明文。"
+      echo
       return 0
     fi
     warn "API Key 生成失败，等待 Headscale 就绪后重试（${attempt}/5）..."
     sleep 3
   done
 
-  if ! headscale apikeys create; then
+  if ! api_key="$(headscale apikeys create)"; then
     warn "API Key 自动生成失败，但主体安装已完成。可稍后手动执行：headscale apikeys create"
+    return 0
+  fi
+
+  echo
+  echo "=========================================="
+  success "Headscale API Key 已创建"
+  echo "=========================================="
+  echo "$api_key"
+  echo "=========================================="
+  warn "请立即保存这个 API Key：Headscale 不支持之后再次取回完整明文。"
+  echo
+}
+
+offer_apikey_for_existing_install() {
+  local answer=""
+
+  echo
+  warn "检测到已有 Headscale 安装。已有 API Key 的完整明文无法再次读取。"
+  read -r -p "是否现在创建一个新的 Headscale API Key？[y/N]: " answer || true
+  answer="${answer:-N}"
+  if [[ "$answer" =~ ^[Yy]$ ]]; then
+    create_apikey
+  else
+    info "已跳过创建新的 API Key。以后可通过 hs -> 创建 Headscale API Key，或执行 headscale apikeys create。"
   fi
 }
 
@@ -2240,7 +2273,7 @@ main() {
   if [[ "$EXISTING_INSTALL" -eq 0 ]]; then
     create_apikey
   else
-    info "已有安装：跳过自动生成新的 API Key；需要时可手动执行 headscale apikeys create。"
+    offer_apikey_for_existing_install
   fi
   enable_verify_clients_if_needed
   post_install_health_check || true

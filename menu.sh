@@ -227,6 +227,34 @@ show_connection_paths() {
   echo "精确验证某台设备：tailscale ping <设备名或 Tailscale IP>"
 }
 
+create_headscale_api_key() {
+  local api_key=""
+
+  if ! command -v headscale >/dev/null 2>&1; then
+    error "未检测到 headscale 命令。"
+    return 1
+  fi
+
+  if ! systemctl is-active --quiet headscale; then
+    error "Headscale 服务当前未运行，请先检查或重启 Headscale。"
+    return 1
+  fi
+
+  info "创建新的 Headscale API Key..."
+  if ! api_key="$(headscale apikeys create)"; then
+    error "API Key 创建失败。"
+    return 1
+  fi
+
+  echo
+  echo "=========================================="
+  success "Headscale API Key 已创建"
+  echo "=========================================="
+  echo "$api_key"
+  echo "=========================================="
+  warn "请立即保存：完整 API Key 只在创建时显示一次，之后无法再次取回。"
+}
+
 show_status() {
   echo
   info "服务状态："
@@ -437,6 +465,7 @@ show_menu() {
   echo "9. Peer Relay 管理"
   echo "10. 查看安装信息"
   echo "11. 查看设备连接路径"
+  echo "12. 创建 Headscale API Key"
   echo "0. 退出"
   echo "=========================================="
 }
@@ -489,6 +518,10 @@ main() {
         ;;
       11)
         show_connection_paths
+        pause
+        ;;
+      12)
+        create_headscale_api_key || true
         pause
         ;;
       0)
