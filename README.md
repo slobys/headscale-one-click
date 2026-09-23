@@ -11,10 +11,10 @@
 新服务器首次部署时，使用 root 用户执行下面这一条命令：
 
 ```bash
-curl -L --connect-timeout 15 https://cdn.jsdelivr.net/gh/slobys/headscale-one-click@main/bootstrap.sh -o /tmp/hs-bootstrap.sh && bash /tmp/hs-bootstrap.sh
+curl -L --connect-timeout 15 https://cdn.jsdelivr.net/gh/slobys/headscale-one-click@main/bootstrap.sh -o /tmp/hs-bootstrap.sh && bash /tmp/hs-bootstrap.sh --menu
 ```
 
-这条命令会自动拉取 / 更新项目、补齐脚本权限，并创建快捷菜单命令 `hs`，随后进入安装流程。**这条长命令主要用于第一次初始化，后续日常使用不需要再记。**
+这条命令会自动拉取 / 更新项目、补齐脚本权限，并创建快捷菜单命令 `hs`，随后**直接打开管理菜单**。首次安装时在菜单中选择“执行安装”即可。**这条长命令主要用于第一次初始化，后续日常使用只需要输入 `hs`。**
 
 ### 以后主要使用 `hs`
 
