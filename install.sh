@@ -275,8 +275,23 @@ validate_ipv4() {
 
 validate_ip_prefix24() {
   local prefix="$1"
+  local first=""
+  local second=""
+
   validate_ipv4 "$prefix" || return 1
-  [[ "${prefix##*.}" == "0" ]]
+  [[ "${prefix##*.}" == "0" ]] || return 1
+
+  IFS='.' read -r first second _ _ <<< "$prefix"
+  [[ "$first" == "100" ]] || return 1
+  (( 10#$second >= 64 && 10#$second <= 127 )) || return 1
+
+  case "$prefix" in
+    100.100.0.0|100.100.100.0|100.115.92.0|100.115.93.0)
+      return 1
+      ;;
+  esac
+
+  return 0
 }
 
 prompt_ip_prefix() {
@@ -290,7 +305,7 @@ prompt_ip_prefix() {
       IP_PREFIX="$input_value"
       return 0
     fi
-    warn "网段格式无效。当前脚本使用 /24，请填写类似 100.64.10.0 或 100.64.10.0/24 的网络地址。"
+    warn "网段无效。Tailscale IPv4 必须使用 100.64.0.0/10 内的 /24，例如 100.64.10.0/24 或 100.68.68.0/24。"
   done
 }
 
@@ -1597,6 +1612,7 @@ main() {
     fi
     if [[ "$EXISTING_INSTALL" -eq 1 ]]; then
       IP_PREFIX="${EXISTING_IP_PREFIX:-100.64.0.0}"
+      validate_ip_prefix24 "$IP_PREFIX" || die "检测到现有虚拟网段 ${IP_PREFIX}/24 不在 Tailscale 支持的 100.64.0.0/10 范围内。为避免客户端异常，快速模式已停止；请先迁移到受支持的 CGNAT 子网。"
       info "已有安装：继续使用 Tailscale 虚拟内网网段 ${IP_PREFIX}/24，快速模式不会自动修改。"
     else
       prompt_ip_prefix "100.64.0.0"
@@ -1647,7 +1663,7 @@ main() {
 
   validate_ipv4 "$SERVER_IP" || die "服务器 IP 格式不正确。"
   validate_hostname_or_ipv4 "$DOMAIN" || die "DERP 主机名格式不正确；只允许标准 DNS 主机名或 IPv4 地址。"
-  validate_ip_prefix24 "$IP_PREFIX" || die "Tailscale 虚拟内网网段格式不正确；当前脚本使用 /24，应类似 100.64.10.0。"
+  validate_ip_prefix24 "$IP_PREFIX" || die "Tailscale 虚拟内网网段必须是 100.64.0.0/10 内的 /24，例如 100.64.10.0/24；不能使用 10.x、172.16.x 或 192.168.x。"
   validate_port "$HEADSCALE_PORT" || die "Headscale 端口无效。"
   validate_port "$DERP_PORT" || die "DERP 端口无效。"
   validate_port "$PEER_RELAY_DEFAULT_PORT" || die "Peer Relay 默认端口无效。"
