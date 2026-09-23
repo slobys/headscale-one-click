@@ -33,12 +33,20 @@ jobs:
         run: |
           set -Eeuo pipefail
           mkdir -p assets
+          host_arch="$(go env GOARCH)"
           for arch in amd64 arm64; do
-            out_dir="$PWD/build-$arch"
-            mkdir -p "$out_dir"
-            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" GOBIN="$out_dir" \
+            gopath="$PWD/gopath-$arch"
+            rm -rf "$gopath"
+            mkdir -p "$gopath"
+            env -u GOBIN GOPATH="$gopath" CGO_ENABLED=0 GOOS=linux GOARCH="$arch" \
               go install "tailscale.com/cmd/derper@v${TAILSCALE_VERSION}"
-            install -m 0755 "$out_dir/derper" "assets/derper-linux-$arch"
+            if [[ "$arch" == "$host_arch" ]]; then
+              built="$gopath/bin/derper"
+            else
+              built="$gopath/bin/linux_${arch}/derper"
+            fi
+            [[ -x "$built" ]] || { echo "derper output not found: $built" >&2; exit 1; }
+            install -m 0755 "$built" "assets/derper-linux-$arch"
             (cd assets && sha256sum "derper-linux-$arch" > "derper-linux-$arch.sha256")
           done
           ls -lh assets
