@@ -1388,7 +1388,7 @@ write_acme_nginx_config() {
     && grep -qF '/.well-known/acme-challenge/' "$NGINX_AVAILABLE"; then
     probe_file="$ACME_WEBROOT/.well-known/acme-challenge/headscale-one-click-probe"
     printf '%s' "$probe_value" > "$probe_file"
-    if curl -fsS --max-time 5 -H "Host: ${CONTROL_HOST}" "http://127.0.0.1/.well-known/acme-challenge/headscale-one-click-probe" | grep -qx "$probe_value"; then
+    if acme_local_probe "$probe_value"; then
       rm -f "$probe_file"
       info "现有 Nginx 已可提供 ACME challenge，复用当前 80/tcp 配置。"
       return 0
@@ -1403,9 +1403,8 @@ server {
   server_name ${CONTROL_HOST};
 
   location ^~ /.well-known/acme-challenge/ {
-    root ${ACME_WEBROOT};
+    alias ${ACME_WEBROOT}/.well-known/acme-challenge/;
     default_type text/plain;
-    try_files \$uri =404;
   }
 
   location = /generate_204 {
@@ -1429,11 +1428,27 @@ EOF
 
   probe_file="$ACME_WEBROOT/.well-known/acme-challenge/headscale-one-click-probe"
   printf '%s' "$probe_value" > "$probe_file"
-  if ! curl -fsS --max-time 5 -H "Host: ${CONTROL_HOST}" "http://127.0.0.1/.well-known/acme-challenge/headscale-one-click-probe" | grep -qx "$probe_value"; then
-    rm -f "$probe_file"
-    die "本机 ACME webroot 验证失败，未继续申请证书。"
+  if ! acme_local_probe "$probe_value"; then
+    warn "本机 ACME 探针暂未命中 challenge 文件；继续交给 Certbot 做公网 HTTP-01 验证。若 80/tcp 或 Nginx 路由有问题，Certbot 会给出最终错误。"
+  else
+    info "本机 ACME challenge 探针通过。"
   fi
   rm -f "$probe_file"
+}
+
+acme_local_probe() {
+  local expected="$1"
+  local body=""
+  local attempt=0
+
+  for attempt in 1 2 3 4 5; do
+    body="$(curl -fsS --noproxy '*' --connect-timeout 2 --max-time 5       --connect-to "${CONTROL_HOST}:${ACME_HTTP_PORT}:127.0.0.1:${ACME_HTTP_PORT}"       "http://${CONTROL_HOST}:${ACME_HTTP_PORT}/.well-known/acme-challenge/headscale-one-click-probe" 2>/dev/null || true)"
+    if [[ "$body" == "$expected" ]]; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
 }
 
 cleanup_acme_nginx_bootstrap() {
@@ -1581,9 +1596,8 @@ server {
   server_name ${CONTROL_HOST};
 
   location ^~ /.well-known/acme-challenge/ {
-    root ${ACME_WEBROOT};
+    alias ${ACME_WEBROOT}/.well-known/acme-challenge/;
     default_type text/plain;
-    try_files \$uri =404;
   }
 
   location = /generate_204 {

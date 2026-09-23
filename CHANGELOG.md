@@ -12,6 +12,7 @@
 - Headscale `server_url`、管理面板地址、客户端加入命令统一改为 `https://主机`，内部服务仍为 `127.0.0.1:18080`
 - DERP TCP 与 Peer Relay UDP 继续首次随机；STUN 保持 `3478/udp`
 - HTTPS 迁移采用“先证书与 Nginx 验证，再切 server_url”的顺序；证书或 Nginx 失败时不破坏旧入口
+- ACME 本机探针改为 reload 后重试并降级为诊断提示；challenge location 使用直接 alias，最终以 Certbot/Let's Encrypt 的公网 HTTP-01 验证结果为准
 - Peer Relay 状态页改为中文可读状态卡片，不再直接显示 `tailscale status` 原始行和空的 `[]`；增加设备路径分类、端点、流量和路径汇总
 - 管理菜单“重启服务”改为选择性重启；Headscale/Nginx 重启前先检查配置，重启后验证服务状态，失败时直接显示状态和日志，不再无条件提示成功
 - Tailscale 虚拟 IPv4 网段校验收紧为 `100.64.0.0/10` 内的 `/24`，并排除 Tailscale 保留网段；已有不受支持网段会停止快速安装并提示迁移
