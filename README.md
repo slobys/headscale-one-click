@@ -4,9 +4,21 @@
 
 当前版本面向 Headscale `0.29.x` 与较新的 Tailscale 客户端：DERP 使用官方 `derper`，通过自签名证书 SHA256 指纹固定工作，不再修改 Tailscale 源码；连接路径可形成 **DIRECT -> Peer Relay -> DERP** 三层兜底。
 
-## 快速使用
+## 快速开始
 
-项目以后以 **`hs` 管理菜单**作为主要入口。已经完成初始化 / 安装的服务器，使用 root 用户直接执行：
+### 第一次安装
+
+新服务器首次部署时，使用 root 用户执行下面这一条命令：
+
+```bash
+curl -L --connect-timeout 15 https://cdn.jsdelivr.net/gh/slobys/headscale-one-click@main/bootstrap.sh -o /tmp/hs-bootstrap.sh && bash /tmp/hs-bootstrap.sh
+```
+
+这条命令会自动拉取 / 更新项目、补齐脚本权限，并创建快捷菜单命令 `hs`，随后进入安装流程。**这条长命令主要用于第一次初始化，后续日常使用不需要再记。**
+
+### 以后主要使用 `hs`
+
+项目后续统一以 **`hs` 管理菜单**作为主要入口。安装完成后，使用 root 用户直接执行：
 
 ```bash
 hs
@@ -16,9 +28,7 @@ hs
 
 其中“查看安装信息”可以重新显示管理面板地址、客户端加入命令、DERP / Peer Relay 端口等信息；“查看设备连接路径”会从当前机器的 `tailscale status` 判断活跃连接是 **P2P 直连、Peer Relay 还是 DERP**。
 
-首次部署时只需要完成一次项目初始化，初始化过程会自动创建 `/usr/local/bin/hs`。之后日常安装、升级、维护和排障都建议直接从 `hs` 菜单进入，不需要再记安装脚本路径或长 `curl` 命令。
-
-如果执行 `hs` 提示命令不存在，说明当前服务器还没有完成项目初始化。
+如果执行 `hs` 提示命令不存在，说明当前服务器还没有完成第一次初始化，请先执行上面的首次安装命令。
 
 ## 中国大陆 VPS 下载策略
 
